@@ -6,21 +6,22 @@ import { ValidationPipe } from '@nestjs/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // CORS - Production için daha esnek yap
+  // CORS - Production için tüm gerekli origin'leri ekle
   app.enableCors({
     origin: [
       'http://localhost',
       'http://localhost:5173', 
       'http://127.0.0.1',
       'http://127.0.0.1:5173',
-      'https://fullstack-proje.onrender.com', // Render frontend URL'in (sonra ekleyeceğiz)
+      'https://backend-nest-msnd.onrender.com',
+      'https://frontend-react-xoq2.onrender.com', // FRONTEND URL'İN
       /\.onrender\.com$/, // Tüm Render domain'lerine izin ver
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
 
-  // Helmet Security
+  // Helmet Security (CSP devre dışı)
   app.use(
     helmet({
       hidePoweredBy: true,
@@ -29,15 +30,7 @@ async function bootstrap() {
         includeSubDomains: true,
         preload: true,
       },
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          connectSrc: ["'self'", 'ws://localhost:*'],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", 'data:'],
-        },
-      },
+      contentSecurityPolicy: false, // CSP'yi devre dışı bırak
     }),
   );
 
