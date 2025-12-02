@@ -5,7 +5,8 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 
-RUN npm ci --only=production
+# DEV dependencies de kur (nest CLI için)
+RUN npm install
 
 # 2. Aşama: Uygulama Build
 COPY . .
