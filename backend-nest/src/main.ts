@@ -4,47 +4,51 @@ import helmet from 'helmet';
 import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
-  // CORS ayarı burada çok önemlidir.
-  // Docker'da localhost, local dev'de localhost:5173 olabilir
-  const app = await NestFactory.create(AppModule, {
-    cors: {
-      origin: ['http://localhost', 'http://localhost:5173', 'http://127.0.0.1', 'http://127.0.0.1:5173'],
-      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-      credentials: true, // Eğer oturum çerezleri kullanacaksanız
-    },
+  const app = await NestFactory.create(AppModule);
+
+  // CORS - Production için daha esnek yap
+  app.enableCors({
+    origin: [
+      'http://localhost',
+      'http://localhost:5173', 
+      'http://127.0.0.1',
+      'http://127.0.0.1:5173',
+      'https://fullstack-proje.onrender.com', // Render frontend URL'in (sonra ekleyeceğiz)
+      /\.onrender\.com$/, // Tüm Render domain'lerine izin ver
+    ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
   });
 
-  // 1. GÜVENLİK BAŞLIKLARI (HELMET) - ZAP Uyarılarını Çözmek İçin
-  app.use(helmet({
-    // X-Powered-By başlığını kaldırır (Vulnerability/Version Information Disclosure uyarısını çözer)
-    hidePoweredBy: true,
-    
-    // Strict-Transport-Security (HSTS) başlığını ekler. 
-    // Bu, HSTS uyarısını çözer (localhost'ta bile ZAP bunu ister).
-    hsts: {
-      maxAge: 31536000, // 1 yıl
-      includeSubDomains: true,
-      preload: true
-    },
-
-    // Content-Security-Policy (CSP) ayarı.
-    // React/Vite ile uyumlu olacak şekilde ayarlandı.
-    contentSecurityPolicy: {
+  // Helmet Security
+  app.use(
+    helmet({
+      hidePoweredBy: true,
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      contentSecurityPolicy: {
         directives: {
-            defaultSrc: ["'self'"],
-            // Vite'ın Hot Reload (ws://localhost:*) bağlantılarına izin ver
-            connectSrc: ["'self'", 'ws://localhost:*'],
-            // Stil ve scriptler için 'unsafe-inline' development ortamında gerekebilir
-            scriptSrc: ["'self'", "'unsafe-inline'"], 
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:"],
+          defaultSrc: ["'self'"],
+          connectSrc: ["'self'", 'ws://localhost:*'],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
         },
-    }
-  }));
+      },
+    }),
+  );
 
-  // Global ValidationPipe (iyi bir uygulama)
+  // Global ValidationPipe
   app.useGlobalPipes(new ValidationPipe());
 
-  await app.listen(3000);
+  // PORT environment variable'dan al
+  const port = process.env.PORT || 3000;
+  
+  await app.listen(port);
+  console.log(`🚀 Application is running on port ${port}`);
 }
+
 bootstrap();
