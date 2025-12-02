@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # --- 1. VERİTABANI (Postgres) Servisi ---
+  db:
+    container_name: postgres-db
+    # Resmi PostgreSQL imajını kullan
+    image: postgres:16-alpine
+    # Verilerin kalıcı olması için volume kullan
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Backend'in bağlantı için kullanacağı ortam değişkenleri
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    # Veritabanı portunu dışarıya aç (DBeaver ile kontrol etmek için)
+    ports:
+      - "5432:5432"
+    networks:
+      - mynetwork
+
+  # --- 2. BACKEND (NestJS) Servisi ---
+  backend:
+    container_name: nestjs-backend
+    # Backend klasöründeki Dockerfile'ı kullan
+    build:
+      context: ./backend-nest
+      dockerfile: Dockerfile
+    # Geliştirme kolaylığı için kodları ve node_modules'ü bağla
+    volumes:
+      - ./backend-nest:/usr/src/app
+      - /usr/src/app/node_modules
+    # Backend'in 3000 portunu dışarıdaki 3000 portuna yönlendir
+    ports:
+      - "3000:3000"
+    # Veritabanı bağlantısı için ortam değişkenleri
+    environment:
+      # Bağlantı ayarlarında hizmet adını 'db' olarak kullan
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: mydatabase
+    # Veritabanı (db) servisi hazır olana kadar bekle
+    depends_on:
+      - db
+    networks:
+      - mynetwork
+
+  # --- 3. FRONTEND (React) Servisi ---
+  frontend:
+    container_name: react-frontend
+    # Frontend klasöründeki Dockerfile'ı kullan
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    # Frontend'in Nginx'i 80 portunu dışarıdaki 80 portuna yönlendir (http://localhost)
+    ports:
+      - "80:80"
+    # Frontend'in API'ye istek atarken kullanacağı adres
+    environment:
+      # React uygulamasındaki fetch komutları bu adrese gidecek
+      VITE_API_URL: http://localhost:3000
+    networks:
+      - mynetwork
+
+# Volume (Kalıcı Veri Depolama Alanı) Tanımı
+volumes:
+  postgres_data:
+
+# Özel Ağ Tanımı (Tüm servislerin birbirini adıyla görmesini sağlar)
+networks:
+  mynetwork:
+    driver: bridge

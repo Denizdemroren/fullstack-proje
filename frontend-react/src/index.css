@@ -1,0 +1,132 @@
+/* frontend-react/src/index.css */
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+  background-color: #f4f4f4;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  color: #333;
+  border-bottom: 2px solid #ccc;
+  padding-bottom: 10px;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  background: #eef;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 4px;
+}
+/* --- Yeni Eklenen CSS --- */
+
+.product-form input {
+  padding: 10px;
+  margin-right: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 200px;
+}
+
+.product-form button {
+  padding: 10px 15px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.product-form button:hover {
+  background-color: #0056b3;
+}
+
+.message {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 4px;
+  background-color: #d4edda;
+  color: #155724;
+}
+/* --- Silme Butonu CSS'i --- */
+.delete-btn {
+  margin-left: 20px;
+  padding: 5px 10px;
+  background-color: #dc3545; /* Kırmızı renk */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+}
+/* --- Düzenleme Butonu ve Form CSS'i --- */
+.edit-btn {
+  margin-left: 20px;
+  padding: 5px 10px;
+  background-color: #ffc107; /* Sarı renk */
+  color: #212529;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.edit-btn:hover {
+  background-color: #e0a800;
+}
+
+/* Düzenleme Formu İçindeki Butonlar */
+.save-btn {
+    /* Genel product-form button stilini kullanacak */
+    background-color: #28a745; /* Yeşil renk */
+    margin-right: 10px;
+}
+
+.save-btn:hover {
+    background-color: #1e7e34;
+}
+
+.cancel-btn {
+    padding: 10px 15px;
+    background-color: #6c757d; /* Gri renk */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.cancel-btn:hover {
+    background-color: #5a6268;
+}
+
+.edit-form-container {
+    padding: 20px;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    background-color: #fff3cd;
+}
+
+.edit-form-container h2 {
+    color: #856404;
+    margin-top: 0;
+}
