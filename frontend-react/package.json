@@ -1,12 +1,17 @@
 {
   "name": "frontend-react",
-  "private": true,
   "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+  "type": "git",
+  "url": "https://github.com/demiroren/fullstack-proje.git"
+  },
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "eslint .", 
     "preview": "vite preview"
   },
   "dependencies": {
@@ -15,6 +20,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "^4.1.1",
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",

@@ -1,0 +1,28 @@
+# Lisans kontrolü için özel image
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Tüm gerekli dosyaları kopyala
+COPY .license-policy.json ./
+COPY check-licenses-simple.js ./
+COPY backend-nest/package.json ./backend-package.json
+COPY frontend-react/package.json ./frontend-package.json
+
+# Backend bağımlılıklarını kur ve kontrol et
+WORKDIR /app/backend-check
+COPY ../backend-nest/package.json ./
+RUN npm ci --only=production
+COPY ../check-licenses-simple.js ./
+COPY ../.license-policy.json ./
+RUN node check-licenses-simple.js
+
+# Frontend bağımlılıklarını kur ve kontrol et  
+WORKDIR /app/frontend-check
+COPY ../frontend-react/package.json ./
+RUN npm ci --only=production
+COPY ../check-licenses-simple.js ./
+COPY ../.license-policy.json ./
+RUN node check-licenses-simple.js
+
+CMD ["echo", "License check completed successfully"]

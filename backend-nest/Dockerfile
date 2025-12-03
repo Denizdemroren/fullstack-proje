@@ -1,12 +1,14 @@
 # 1. Aşama: Bağımlılıkları Kurma
 FROM node:20-alpine AS builder
-
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-
-# DEV dependencies de kur (nest CLI için)
 RUN npm install
+
+# LİSANS KONTROLÜ - Build aşamasında yap
+COPY check-licenses-simple.js ./
+COPY .license-policy.json ./
+RUN node check-licenses-simple.js
 
 # 2. Aşama: Uygulama Build
 COPY . .
@@ -16,12 +18,9 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /usr/src/app
 
-# Sadece production dependencies ve build output kopyala
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/package.json ./package.json
 
 EXPOSE 3000
-
-# Production modda çalıştır
 CMD ["node", "dist/main"]

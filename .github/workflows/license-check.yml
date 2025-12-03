@@ -1,0 +1,62 @@
+name: License Compliance Check
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  license-compliance:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Check Backend License
+      run: |
+        echo "🔧 Backend Lisans Kontrolü"
+        cd backend-nest
+        node ../check-licenses-simple.js
+    
+    - name: Check Frontend License  
+      run: |
+        echo "🎨 Frontend Lisans Kontrolü"
+        cd frontend-react
+        # Frontend ES module olduğu için .cjs uzantılı script kullan
+        if [ -f "check-licenses-simple.cjs" ]; then
+          node check-licenses-simple.cjs
+        else
+          node ../check-licenses-simple.js
+        fi
+    
+    - name: Generate SBOM Report
+      if: always()
+      run: |
+        echo "📦 SBOM Raporu Oluşturuluyor..."
+        echo "Proje: Fullstack (Backend + Frontend)" > SBOM-REPORT.md
+        echo "Oluşturulma Tarihi: $(date)" >> SBOM-REPORT.md
+        echo "" >> SBOM-REPORT.md
+        echo "## Backend Bağımlılıkları" >> SBOM-REPORT.md
+        echo "\`\`\`json" >> SBOM-REPORT.md
+        cat backend-nest/package.json | jq '.dependencies' >> SBOM-REPORT.md 2>/dev/null || echo "Bağımlılıklar okunamadı" >> SBOM-REPORT.md
+        echo "\`\`\`" >> SBOM-REPORT.md
+        echo "" >> SBOM-REPORT.md
+        echo "## Frontend Bağımlılıkları" >> SBOM-REPORT.md
+        echo "\`\`\`json" >> SBOM-REPORT.md
+        cat frontend-react/package.json | jq '.dependencies' >> SBOM-REPORT.md 2>/dev/null || echo "Bağımlılıklar okunamadı" >> SBOM-REPORT.md
+        echo "\`\`\`" >> SBOM-REPORT.md
+    
+    - name: Upload SBOM Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-report
+        path: SBOM-REPORT.md
+        retention-days: 7
