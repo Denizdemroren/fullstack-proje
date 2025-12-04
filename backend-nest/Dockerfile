@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /usr/src/app
 
+# Git'i kur
+RUN apk add --no-cache git
+
 COPY package*.json ./
 RUN npm install
 
@@ -17,6 +20,9 @@ RUN npm run build
 # 3. Aşama: Production Image
 FROM node:20-alpine
 WORKDIR /usr/src/app
+
+# Production'da da git'i kur
+RUN apk add --no-cache git
 
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/dist ./dist
