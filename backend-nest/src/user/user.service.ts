@@ -11,27 +11,25 @@ export class UserService {
     private usersRepository: Repository<User>,
   ) {}
 
-  async create(userData: { email: string; password: string; firstName: string; lastName: string }): Promise<User> {
-    const hashedPassword = await bcrypt.hash(userData.password, 10);
-    const user = this.usersRepository.create({
-      email: userData.email,
-      password: hashedPassword,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
-    });
-    return this.usersRepository.save(user);
-  }
+  async create(userData: { username: string; password: string }): Promise<User> {
+  const hashedPassword = await bcrypt.hash(userData.password, 10);
+  const user = this.usersRepository.create({
+    username: userData.username,
+    password: hashedPassword,
+  });
+  return this.usersRepository.save(user);
+}
 
-  async findByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { email } });
+  async findByUsername(username: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { username } });
   }
 
   async findById(id: number): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
   }
 
-  async validateUser(email: string, password: string): Promise<User | null> {
-    const user = await this.findByEmail(email);
+  async validateUser(username: string, password: string): Promise<User | null> {
+    const user = await this.findByUsername(username);
     if (user && await bcrypt.compare(password, user.password)) {
       return user;
     }

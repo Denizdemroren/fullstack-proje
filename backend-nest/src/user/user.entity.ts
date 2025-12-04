@@ -8,26 +8,14 @@ export class User {
   id: number;
 
   @Column({ unique: true })
-  email: string;
+  username: string;
 
   @Column()
   password: string;
-
-  @Column()
-  firstName: string;
-
-  @Column()
-  lastName: string;
 
   @OneToMany(() => Product, (product: Product) => product.user)
   products: Product[];
 
   @OneToMany(() => Analysis, (analysis: Analysis) => analysis.user)
   analyses: Analysis[];
-
-  @Column({ default: () => 'CURRENT_TIMESTAMP' })
-  createdAt: Date;
-
-  @Column({ default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
-  updatedAt: Date;
 }
