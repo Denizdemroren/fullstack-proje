@@ -1,15 +1,8 @@
-// backend-nest/src/user/user.service.ts
-
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
-
-// Yeni kullanıcı oluşturma için basit bir tip tanımı
-interface CreateUserDto {
-    username: string;
-    password: string;
-}
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UserService {
@@ -18,17 +11,30 @@ export class UserService {
     private usersRepository: Repository<User>,
   ) {}
 
-  // DÜZELTME: Dönüş tipi 'User | undefined' yerine 'User | null' yapıldı.
-  // Çünkü TypeORM kayıt bulamazsa 'null' döner.
-  async findOne(username: string): Promise<User | null> {
-    // Veritabanından eşleşen kullanıcıyı döndürür
-    return this.usersRepository.findOne({ where: { username } });
+  async create(userData: { email: string; password: string; firstName: string; lastName: string }): Promise<User> {
+    const hashedPassword = await bcrypt.hash(userData.password, 10);
+    const user = this.usersRepository.create({
+      email: userData.email,
+      password: hashedPassword,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+    });
+    return this.usersRepository.save(user);
   }
 
-  // Yeni kullanıcı oluşturma metodu
-  async create(user: CreateUserDto): Promise<User> {
-    // Yeni kullanıcı nesnesini oluştur ve kaydet (şifre hash'lenmiş olmalı)
-    const newUser = this.usersRepository.create(user);
-    return this.usersRepository.save(newUser);
+  async findByEmail(email: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { email } });
+  }
+
+  async findById(id: number): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { id } });
+  }
+
+  async validateUser(email: string, password: string): Promise<User | null> {
+    const user = await this.findByEmail(email);
+    if (user && await bcrypt.compare(password, user.password)) {
+      return user;
+    }
+    return null;
   }
 }

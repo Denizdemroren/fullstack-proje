@@ -1,37 +1,49 @@
-// backend-nestjs/src/auth/auth.controller.ts
-// Kayıt ve Giriş API uç noktaları
-
 import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { LocalAuthGuard } from './local-auth.guard'; // Local Auth Guard'ı içe aktar
-import { LoginUserDto } from './dto/login-user.dto';
+import { LocalAuthGuard } from './local-auth.guard';
 
-@Controller('auth') // Tüm uç noktalar '/auth' ile başlar
+@Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
-  // POST /auth/register
-  // Yeni kullanıcı kaydı oluşturur
   @Post('register')
-  async register(@Body() createUserDto: CreateUserDto) {
-    const user = await this.authService.register(createUserDto);
-    // Şifreyi göstermemek için hassas verileri temizle
-    const { password, ...result } = user; 
+  async register(@Body() registerDto: {
+    username: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+  }) {
+    // username'i email olarak kullan (frontend'den username geliyor)
+    const user = await this.authService.register({
+      email: registerDto.username,
+      password: registerDto.password,
+      firstName: registerDto.firstName || registerDto.username,
+      lastName: registerDto.lastName || '',
+    });
+    
     return {
-        message: 'Kullanıcı kaydı başarıyla oluşturuldu.',
-        user: result,
+      message: 'User registered successfully',
+      user: {
+        id: user.id,
+        username: user.email, // frontend'e username olarak email dön
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
     };
   }
 
-  // POST /auth/login
-  // LocalAuthGuard, kimlik doğrulamasını tetikler. Başarılı olursa,
-  // kullanıcının şifresiz bilgisi req.user nesnesine eklenir.
   @UseGuards(LocalAuthGuard)
   @Post('login')
-  async login(@Request() req, @Body() loginUserDto: LoginUserDto) {
-    // AuthService.login() metodu, req.user'daki bilgiyi alıp JWT üretir.
-    return this.authService.login(req.user);
+  async login(@Request() req, @Body() loginDto: { username: string; password: string }) {
+    const result = await this.authService.login(req.user);
+    
+    // Frontend'e username olarak email dön
+    return {
+      ...result,
+      user: {
+        ...result.user,
+        username: result.user.email,
+      }
+    };
   }
 }
-

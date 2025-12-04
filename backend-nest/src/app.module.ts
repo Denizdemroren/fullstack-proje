@@ -1,33 +1,45 @@
-// backend-nest/src/app.module.ts
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ProductsModule } from './products/products.module';
 import { Product } from './products/entities/product.entity';
 import { UserModule } from './user/user.module';
 import { User } from './user/user.entity';
 import { AuthModule } from './auth/auth.module';
+import { AnalysisModule } from './analysis/analysis.module';
+import { Analysis } from './analysis/analysis.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      // DATABASE_URL kullanıyoruz, eğer yoksa ayrı ayrı değişkenlere bak
-      url: process.env.DATABASE_URL,
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USER || 'user',
-      password: process.env.DB_PASSWORD || 'password',
-      database: process.env.DB_NAME || 'mydatabase',
-      entities: [Product, User],
-      synchronize: true,
-      autoLoadEntities: true,
-      // SSL connection için (Render PostgreSQL SSL gerektirir)
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        host: configService.get('DB_HOST'),
+        port: configService.get<number>('DB_PORT'),
+        username: configService.get('DB_USER'),
+        password: configService.get('DB_PASSWORD'),
+        database: configService.get('DB_NAME'),
+        entities: [Product, User, Analysis],
+        synchronize: false,
+        autoLoadEntities: true,
+        ssl: true,
+        extra: {
+          ssl: {
+            rejectUnauthorized: false,
+          },
+        },
+      }),
+      inject: [ConfigService],
     }),
     ProductsModule,
     UserModule,
     AuthModule,
+    AnalysisModule,
   ],
   controllers: [],
   providers: [],

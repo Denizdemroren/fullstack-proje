@@ -1,19 +1,33 @@
-// backend-nestjs/src/user/user.entity.ts
-
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { Product } from '../products/entities/product.entity';
+import { Analysis } from '../analysis/analysis.entity';
 
 @Entity()
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ unique: true }) // Kullanıcı adının tekil olmasını sağlıyoruz
-  username: string;
+  @Column({ unique: true })
+  email: string;
 
-  @Column() // Şifrenin şifrelenmiş halini tutacak
-  password: string; 
+  @Column()
+  password: string;
 
-  // Kullanıcı tablosuna eklenebilecek ek alanlar (isteğe bağlı)
-  @Column({ default: true })
-  isActive: boolean;
+  @Column()
+  firstName: string;
+
+  @Column()
+  lastName: string;
+
+  @OneToMany(() => Product, (product: Product) => product.user)
+  products: Product[];
+
+  @OneToMany(() => Analysis, (analysis: Analysis) => analysis.user)
+  analyses: Analysis[];
+
+  @Column({ default: () => 'CURRENT_TIMESTAMP' })
+  createdAt: Date;
+
+  @Column({ default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
+  updatedAt: Date;
 }

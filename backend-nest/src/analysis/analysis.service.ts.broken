@@ -1,0 +1,252 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Analysis } from './analysis.entity';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+const execAsync = promisify(exec);
+
+interface PackageData {
+  name?: string;
+  version?: string;
+  license?: string;
+  [key: string]: any;
+}
+
+interface PackageLock {
+  packages?: {
+    [key: string]: PackageData;
+  };
+}
+
+@Injectable()
+export class AnalysisService {
+  private readonly logger = new Logger(AnalysisService.name);
+
+  constructor(
+    @InjectRepository(Analysis)
+    private analysisRepository: Repository<Analysis>,
+  ) {}
+
+  async createAnalysis(userId: number, githubUrl: string): Promise<Analysis> {
+    const analysis = this.analysisRepository.create({
+      userId,
+      githubUrl,
+      status: 'pending',
+    });
+
+    await this.analysisRepository.save(analysis);
+    
+    // Arka planda analizi başlat
+    this.startAnalysis(analysis.id).catch(err => {
+      this.logger.error(`Analysis ${analysis.id} failed: ${err.message}`);
+    });
+
+    return analysis;
+  }
+
+  async startAnalysis(analysisId: number): Promise<void> {
+    const analysis = await this.analysisRepository.findOne({
+      where: { id: analysisId },
+    });
+
+    if (!analysis) {
+      throw new Error('Analysis not found');
+    }
+
+    try {
+      analysis.status = 'processing';
+      await this.analysisRepository.save(analysis);
+
+      // 1. Repo'yu clone et
+      const tempDir = await this.cloneRepository(analysis.githubUrl);
+      
+      // 2. SBOM oluştur
+      const sbomData = await this.generateSBOM(tempDir);
+      
+      // 3. Lisans analizi yap
+      const licenseReport = await this.analyzeLicenses(tempDir);
+      
+      // 4. Sonuçları kaydet
+      analysis.sbomData = sbomData;
+      analysis.licenseReport = licenseReport;
+      analysis.status = 'completed';
+      
+      await this.analysisRepository.save(analysis);
+
+      // 5. Temp dizini temizle
+      await fs.promises.rm(tempDir, { recursive: true, force: true });
+
+    } catch (error) {
+      this.logger.error(`Analysis failed: ${error.message}`);
+      analysis.status = 'failed';
+      analysis.errorMessage = error.message;
+      await this.analysisRepository.save(analysis);
+    }
+  }
+
+  private async cloneRepository(githubUrl: string): Promise<string> {
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'repo-'));
+    const repoName = this.extractRepoName(githubUrl);
+    
+    this.logger.log(`Cloning ${githubUrl} to ${tempDir}`);
+    
+    try {
+      await execAsync(`git clone ${githubUrl} ${tempDir}`, {
+        timeout: 30000,
+      });
+    } catch (error) {
+      throw new Error(`Failed to clone repository: ${error.message}`);
+    }
+
+    const fullPath = path.join(tempDir, repoName);
+    this.logger.log(`Clone path: ${fullPath}`);
+    return fullPath;
+  }
+
+  private extractRepoName(githubUrl: string): string {
+    this.logger.log(`Extracting repo name from: ${githubUrl}`);
+    
+    // Örnek: https://github.com/axios/axios -> axios
+    // Örnek: https://github.com/axios/axios.git -> axios
+    // Örnek: https://github.com/user/repo-name -> repo-name
+    
+    const url = new URL(githubUrl);
+    const pathParts = url.pathname.split('/').filter(part => part.length > 0);
+    
+    if (pathParts.length >= 2) {
+      const repoName = pathParts[1].replace(/\.git$/, '');
+      this.logger.log(`Extracted repo name: ${repoName}`);
+      return repoName;
+    }
+    
+    this.logger.warn(`Could not extract repo name from URL: ${githubUrl}`);
+    return 'repository';
+  }`);
+    const match = githubUrl.match(/github\.com\/([^\/]+\/[^\/]+?)(?:\.git)?$/);
+    const repoName = match ? match[1].split('/')[1] : 'repository';
+    this.logger.log(`Extracted repo name: ${repoName}`);
+    return repoName;
+  }
+
+  private async generateSBOM(repoPath: string): Promise<any> {
+    this.logger.log(`Generating SBOM for ${repoPath}`);
+    
+    // Önce package.json var mı kontrol et
+    this.logger.log(`Checking for package.json at: ${repoPath}`);
+    const packageJsonPath = path.join(repoPath, 'package.json');
+    this.logger.log(`Package.json path: ${packageJsonPath}`);
+    
+    if (!fs.existsSync(packageJsonPath)) {
+      this.logger.error(`Package.json NOT FOUND at: ${packageJsonPath}`);
+      // Tüm dosyaları listele
+      try {
+        const files = await fs.promises.readdir(repoPath);
+        this.logger.log(`Files in repo: ${files.join(', ')}`);
+      } catch (err) {
+        this.logger.error(`Cannot read directory: ${err.message}`);
+      }
+      return { error: 'No package.json found' };
+    }
+
+    try {
+      // npm list çalıştır - comment out for now
+      // await execAsync('npm list --all --json', { cwd: repoPath });
+      
+      const packageJson = JSON.parse(
+        await fs.promises.readFile(packageJsonPath, 'utf-8')
+      );
+
+      return {
+        projectName: packageJson.name,
+        version: packageJson.version,
+        dependencies: packageJson.dependencies || {},
+        devDependencies: packageJson.devDependencies || {},
+        license: packageJson.license,
+      };
+    } catch (error) {
+      this.logger.warn(`SBOM generation failed: ${error.message}`);
+      return { error: 'SBOM generation failed', details: error.message };
+    }
+  }
+
+  private async analyzeLicenses(repoPath: string): Promise<any> {
+    this.logger.log(`Analyzing licenses for ${repoPath}`);
+    
+    const licensePolicy = {
+      allowed: ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC'],
+      banned: ['GPL-1.0', 'GPL-2.0', 'GPL-3.0', 'AGPL-1.0', 'AGPL-3.0'],
+      review: ['LGPL', 'MPL']
+    };
+
+    const report: any = {
+      allowed: [],
+      banned: [],
+      needsReview: [],
+      unknown: [],
+      summary: {
+        total: 0,
+        compliant: 0,
+        nonCompliant: 0,
+        needsReview: 0,
+        error: ''
+      }
+    };
+
+    try {
+      // package-lock.json'dan bağımlılıkları oku
+      const packageLockPath = path.join(repoPath, 'package-lock.json');
+      if (fs.existsSync(packageLockPath)) {
+        const packageLock: PackageLock = JSON.parse(
+          await fs.promises.readFile(packageLockPath, 'utf-8')
+        );
+
+        if (packageLock.packages) {
+          for (const [pkgPath, pkgData] of Object.entries(packageLock.packages)) {
+            if (pkgData && pkgData.name && pkgData.version) {
+              report.summary.total++;
+              
+              const license = pkgData.license || 'UNKNOWN';
+              const licenseUpper = license.toUpperCase();
+              
+              if (licensePolicy.banned.some(b => licenseUpper.includes(b.toUpperCase()))) {
+                report.banned.push({ package: pkgData.name, version: pkgData.version, license });
+                report.summary.nonCompliant++;
+              } else if (licensePolicy.review.some(r => licenseUpper.includes(r.toUpperCase()))) {
+                report.needsReview.push({ package: pkgData.name, version: pkgData.version, license });
+                report.summary.needsReview++;
+              } else if (licensePolicy.allowed.some(a => licenseUpper.includes(a.toUpperCase()))) {
+                report.allowed.push({ package: pkgData.name, version: pkgData.version, license });
+                report.summary.compliant++;
+              } else {
+                report.unknown.push({ package: pkgData.name, version: pkgData.version, license });
+              }
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`License analysis failed: ${error.message}`);
+      report.summary.error = error.message;
+    }
+
+    return report;
+  }
+
+  async getUserAnalyses(userId: number): Promise<Analysis[]> {
+    return this.analysisRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getAnalysis(id: number, userId: number): Promise<Analysis | null> {
+    return this.analysisRepository.findOne({
+      where: { id, userId },
+    });
+  }
+}

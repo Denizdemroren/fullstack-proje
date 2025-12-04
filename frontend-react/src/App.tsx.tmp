@@ -1,0 +1,16 @@
+import React, { useState, useEffect, useCallback } from 'react';
+// Lucide React ikonlarını kullanmak için gerekli importlar
+import { LogIn, UserPlus, LogOut, Package, Trash2, Edit2, PlusCircle, AlertTriangle, CheckCircle, XCircle, Github } from 'lucide-react';
+import AnalysisPage from './AnalysisPage';
+
+// API adresi: LOCAL backend'e bağlan
+const API_BASE_URL = 'http://localhost:3000';
+
+// Ürün Tipi Tanımı
+interface Product {
+  id: number;
+  name: string;
+  price: number | string;
+}
+
+// ... dosyanın geri kalanı aynı kalacak
