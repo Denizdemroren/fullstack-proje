@@ -5,9 +5,7 @@ import AnalysisPage from './AnalysisPage';
 
 // API adresi: Docker'da ortam değişkeninden, yerelde 'http://localhost:3000' olarak alınır.
 // Bu yapı, React'in bir build ortamından çalışması için kritik öneme sahiptir.
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://backend-nest-msnd.onrender.com';
-// Ürün Tipi Tanımı
-interface Product {
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://backend-nest-msnd.onrender.com';interface Product {
   id: number;
   name: string;
   price: number | string;
