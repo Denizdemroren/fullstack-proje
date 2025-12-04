@@ -24,7 +24,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
 
-  const API_BASE_URL = 'http://localhost:3000';
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://backend-nest-msnd.onrender.com';
 
   const fetchAnalyses = async () => {
     if (!token) return;
