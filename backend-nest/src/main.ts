@@ -8,13 +8,17 @@ dotenv.config();
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // CORS ayarları
+  // CORS ayarları - hem local hem Render frontend
   app.enableCors({
-    origin: 'http://localhost:5173', // Vite default port
+    origin: [
+      'http://localhost:5173', // Vite default port (local)
+      'https://frontend-react-xoq2.onrender.com', // Render frontend URL
+    ],
     credentials: true,
   });
   
-  await app.listen(3000);
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
   console.log(`🚀 Application is running on: ${await app.getUrl()}`);
 }
 bootstrap();
