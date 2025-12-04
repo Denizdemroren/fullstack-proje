@@ -25,7 +25,8 @@ import { Analysis } from './analysis/analysis.entity';
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
         entities: [Product, User, Analysis],
-        synchronize: false,
+        synchronize: configService.get('NODE_ENV') !== 'production',
+
         autoLoadEntities: true,
         ssl: true,
         extra: {
