@@ -34,150 +34,152 @@ export class AnalysisService {
   ) {}
 
   async createAnalysis(userId: number, githubUrl: string): Promise<Analysis> {
-  this.logger.log(`=== CREATE ANALYSIS REQUEST: userId=${userId}, url=${githubUrl} ===`);
-  
-  const analysis = this.analysisRepository.create({
-    userId,
-    githubUrl,
-    status: 'pending',
-  });
+    this.logger.log(`=== CREATE ANALYSIS REQUEST: userId=${userId}, url=${githubUrl} ===`);
+    
+    const analysis = this.analysisRepository.create({
+      userId,
+      githubUrl,
+      status: 'pending',
+    });
 
-  await this.analysisRepository.save(analysis);
-  
-  this.logger.log(`=== ANALYSIS CREATED: id=${analysis.id} ===`);
-  
-  // Arka planda analizi başlat
-  this.startAnalysis(analysis.id).catch(err => {
-    this.logger.error(`Analysis ${analysis.id} failed: ${err.message}`);
-  });
+    await this.analysisRepository.save(analysis);
+    
+    this.logger.log(`=== ANALYSIS CREATED: id=${analysis.id} ===`);
+    
+    // Arka planda analizi başlat
+    this.startAnalysis(analysis.id).catch(err => {
+      this.logger.error(`Analysis ${analysis.id} failed: ${err.message}`);
+    });
 
-  return analysis;
-}
+    return analysis;
+  }
 
   async startAnalysis(analysisId: number): Promise<void> {
-  this.logger.log(`=== STARTING ANALYSIS ${analysisId} ===`);
-  
-  const analysis = await this.analysisRepository.findOne({
-    where: { id: analysisId },
-  });
+    this.logger.log(`=== STARTING ANALYSIS ${analysisId} ===`);
+    
+    const analysis = await this.analysisRepository.findOne({
+      where: { id: analysisId },
+    });
 
-  if (!analysis) {
-    this.logger.error(`Analysis ${analysisId} not found`);
-    throw new Error('Analysis not found');
+    if (!analysis) {
+      this.logger.error(`Analysis ${analysisId} not found`);
+      throw new Error('Analysis not found');
+    }
+
+    try {
+      this.logger.log(`Analysis ${analysisId} found, githubUrl: ${analysis.githubUrl}`);
+      analysis.status = 'processing';
+      await this.analysisRepository.save(analysis);
+
+      // 1. Repo'yu clone et
+      const tempDir = await this.cloneRepository(analysis.githubUrl);
+      
+      // 2. SBOM oluştur
+      const sbomData = await this.generateSBOM(tempDir);
+      
+      // 3. Lisans analizi yap
+      const licenseReport = await this.analyzeLicenses(tempDir);
+      
+      // 4. Sonuçları kaydet
+      analysis.sbomData = sbomData;
+      analysis.licenseReport = licenseReport;
+      analysis.status = 'completed';
+      
+      await this.analysisRepository.save(analysis);
+
+      // 5. Temp dizini temizle
+      await fs.promises.rm(tempDir, { recursive: true, force: true });
+
+      this.logger.log(`=== ANALYSIS ${analysisId} COMPLETED ===`);
+
+    } catch (error) {
+      this.logger.error(`Analysis ${analysisId} failed: ${error.message}`);
+      analysis.status = 'failed';
+      analysis.errorMessage = error.message;
+      await this.analysisRepository.save(analysis);
+      this.logger.log(`=== ANALYSIS ${analysisId} FAILED ===`);
+    }
   }
-
-  try {
-    this.logger.log(`Analysis ${analysisId} found, githubUrl: ${analysis.githubUrl}`);
-    analysis.status = 'processing';
-    await this.analysisRepository.save(analysis);
-
-    // 1. Repo'yu clone et
-    const tempDir = await this.cloneRepository(analysis.githubUrl);
-    
-    // 2. SBOM oluştur
-    const sbomData = await this.generateSBOM(tempDir);
-    
-    // 3. Lisans analizi yap
-    const licenseReport = await this.analyzeLicenses(tempDir);
-    
-    // 4. Sonuçları kaydet
-    analysis.sbomData = sbomData;
-    analysis.licenseReport = licenseReport;
-    analysis.status = 'completed';
-    
-    await this.analysisRepository.save(analysis);
-
-    // 5. Temp dizini temizle
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
-
-    this.logger.log(`=== ANALYSIS ${analysisId} COMPLETED ===`);
-
-  } catch (error) {
-    this.logger.error(`Analysis ${analysisId} failed: ${error.message}`);
-    analysis.status = 'failed';
-    analysis.errorMessage = error.message;
-    await this.analysisRepository.save(analysis);
-    this.logger.log(`=== ANALYSIS ${analysisId} FAILED ===`);
-  }
-}
 
   private async cloneRepository(githubUrl: string): Promise<string> {
-  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'repo-'));
-  const repoName = this.extractRepoName(githubUrl);
-  const repoPath = path.join(tempDir, repoName);
-  
-  this.logger.log(`Cloning ${githubUrl} to ${tempDir}`);
-  this.logger.log(`Expected repo path: ${repoPath}`);
-  
-  try {
-    // 1. Repo'yu clone et
-    await execAsync(`git clone ${githubUrl} ${repoPath}`, {
-      timeout: 120000,
-      cwd: tempDir
-    });
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'repo-'));
+    const repoName = this.extractRepoName(githubUrl);
+    const repoPath = path.join(tempDir, repoName);
     
-    this.logger.log(`Clone successful. Checking if repo exists at: ${repoPath}`);
+    this.logger.log(`Cloning ${githubUrl} to ${tempDir}`);
+    this.logger.log(`Expected repo path: ${repoPath}`);
     
-    let finalRepoPath = repoPath;
-    
-    // Repo'nun var olduğunu kontrol et
-    if (!fs.existsSync(repoPath)) {
-      this.logger.error(`Repo path does not exist after clone: ${repoPath}`);
-      const files = await fs.promises.readdir(tempDir);
-      this.logger.log(`Files in temp directory: ${files.join(', ')}`);
+    try {
+      // 1. Repo'yu clone et
+      await execAsync(`git clone ${githubUrl} ${repoPath}`, {
+        timeout: 120000,
+        cwd: tempDir
+      });
       
-      // İlk directory'yi bul
-      for (const file of files) {
-        const fullPath = path.join(tempDir, file);
-        const stat = await fs.promises.stat(fullPath);
-        if (stat.isDirectory()) {
-          this.logger.log(`Found directory: ${fullPath}, using as repo path`);
-          finalRepoPath = fullPath;
-          break;
+      this.logger.log(`Clone successful. Checking if repo exists at: ${repoPath}`);
+      
+      let finalRepoPath = repoPath;
+      
+      // Repo'nun var olduğunu kontrol et
+      if (!fs.existsSync(repoPath)) {
+        this.logger.error(`Repo path does not exist after clone: ${repoPath}`);
+        const files = await fs.promises.readdir(tempDir);
+        this.logger.log(`Files in temp directory: ${files.join(', ')}`);
+        
+        // İlk directory'yi bul
+        for (const file of files) {
+          const fullPath = path.join(tempDir, file);
+          const stat = await fs.promises.stat(fullPath);
+          if (stat.isDirectory()) {
+            this.logger.log(`Found directory: ${fullPath}, using as repo path`);
+            finalRepoPath = fullPath;
+            break;
+          }
+        }
+        
+        if (finalRepoPath === repoPath) {
+          throw new Error(`Repository directory not found after clone`);
         }
       }
       
-      if (finalRepoPath === repoPath) {
-        throw new Error(`Repository directory not found after clone`);
-      }
-    }
-    
-    // 2. Bağımlılıkları yükle (sadece production)
-    const packageJsonPath = path.join(finalRepoPath, 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      this.logger.log(`Installing dependencies for ${finalRepoPath}`);
-      try {
-        await execAsync('npm ci --only=production', {
-          timeout: 180000,
-          cwd: finalRepoPath
-        });
-        this.logger.log(`Dependencies installed successfully`);
-      } catch (installError) {
-        this.logger.warn(`Failed to install dependencies: ${installError.message}`);
-        // Fallback: npm install --production
+      // 2. Bağımlılıkları yükle (sadece production)
+      const packageJsonPath = path.join(finalRepoPath, 'package.json');
+      if (fs.existsSync(packageJsonPath)) {
+        this.logger.log(`Installing dependencies for ${finalRepoPath}`);
         try {
-          await execAsync('npm install --production', {
+          // İlk deneme: npm ci --ignore-scripts
+          await execAsync('npm ci --only=production --ignore-scripts', {
             timeout: 180000,
             cwd: finalRepoPath
           });
-          this.logger.log(`Dependencies installed with fallback`);
-        } catch (fallbackError) {
-          this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
+          this.logger.log(`Dependencies installed successfully with npm ci`);
+        } catch (installError) {
+          this.logger.warn(`npm ci failed: ${installError.message}`);
+          // Fallback: npm install --ignore-scripts
+          try {
+            await execAsync('npm install --production --ignore-scripts', {
+              timeout: 180000,
+              cwd: finalRepoPath
+            });
+            this.logger.log(`Dependencies installed with npm install`);
+          } catch (fallbackError) {
+            this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
+            // Hata durumunda devam et, belki node_modules zaten yüklüdür
+          }
         }
       }
+      
+      return finalRepoPath;
+    } catch (error) {
+      this.logger.error(`Clone failed: ${error.message}`);
+      try {
+        await fs.promises.rm(tempDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        this.logger.warn(`Failed to clean up temp directory: ${cleanupError.message}`);
+      }
+      throw new Error(`Failed to clone repository: ${error.message}`);
     }
-    
-    return finalRepoPath;
-  } catch (error) {
-    this.logger.error(`Clone failed: ${error.message}`);
-    try {
-      await fs.promises.rm(tempDir, { recursive: true, force: true });
-    } catch (cleanupError) {
-      this.logger.warn(`Failed to clean up temp directory: ${cleanupError.message}`);
-    }
-    throw new Error(`Failed to clone repository: ${error.message}`);
   }
-}
 
   private extractRepoName(githubUrl: string): string {
     // Örnek: https://github.com/axios/axios -> axios
@@ -285,15 +287,16 @@ export class AnalysisService {
 
     const packageDir = path.dirname(packageJsonPath);
     this.logger.log(`Package directory: ${packageDir}`);
-this.logger.log(`Package.json path: ${packageJsonPath}`);
+    this.logger.log(`Package.json path: ${packageJsonPath}`);
 
-// package.json içeriğini logla
-try {
-  const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
-  this.logger.log(`Package.json content (first 500 chars): ${pkgContent.substring(0, 500)}`);
-} catch (err) {
-  this.logger.error(`Cannot read package.json: ${err.message}`);
-}
+    // package.json içeriğini logla
+    try {
+      const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
+      this.logger.log(`Package.json content (first 500 chars): ${pkgContent.substring(0, 500)}`);
+    } catch (err) {
+      this.logger.error(`Cannot read package.json: ${err.message}`);
+    }
+    
     this.logger.log(`Starting license-checker for directory: ${packageDir}`);
     
     const report: any = {
