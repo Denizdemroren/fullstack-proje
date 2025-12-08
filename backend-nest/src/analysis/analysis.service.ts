@@ -142,13 +142,13 @@ export class AnalysisService {
         }
       }
       
-      // 2. Bağımlılıkları yükle (sadece production)
+      // 2. Bağımlılıkları yükle (tüm bağımlılıklar)
       const packageJsonPath = path.join(finalRepoPath, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
         this.logger.log(`Installing dependencies for ${finalRepoPath}`);
         try {
-          // İlk deneme: npm ci --ignore-scripts
-          await execAsync('npm ci --only=production --ignore-scripts', {
+          // İlk deneme: npm ci --ignore-scripts (tüm bağımlılıklar)
+          await execAsync('npm ci --ignore-scripts', {
             timeout: 180000,
             cwd: finalRepoPath
           });
@@ -157,10 +157,10 @@ export class AnalysisService {
           this.logger.warn(`npm ci failed: ${installError.message}`);
           // Fallback: npm install --ignore-scripts
           try {
-            await execAsync('npm ci --ignore-scripts', {
-  timeout: 180000,
-  cwd: finalRepoPath
-});
+            await execAsync('npm install --ignore-scripts', {
+              timeout: 180000,
+              cwd: finalRepoPath
+            });
             this.logger.log(`Dependencies installed with npm install`);
           } catch (fallbackError) {
             this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
@@ -297,6 +297,18 @@ export class AnalysisService {
       this.logger.error(`Cannot read package.json: ${err.message}`);
     }
     
+    // Debug: node_modules var mı?
+    const nodeModulesPath = path.join(packageDir, 'node_modules');
+    this.logger.log(`Checking if node_modules exists: ${fs.existsSync(nodeModulesPath)}`);
+    if (fs.existsSync(nodeModulesPath)) {
+      try {
+        const nodeModulesContent = await fs.promises.readdir(nodeModulesPath);
+        this.logger.log(`First 10 items in node_modules: ${nodeModulesContent.slice(0, 10).join(', ')}`);
+      } catch (err) {
+        this.logger.error(`Cannot read node_modules: ${err.message}`);
+      }
+    }
+    
     this.logger.log(`Starting license-checker for directory: ${packageDir}`);
     
     const report: any = {
@@ -319,21 +331,44 @@ export class AnalysisService {
     };
 
     try {
+      // license-checker options
+      const options = {
+        start: packageDir,
+        production: false,
+        development: true,
+        json: true,
+        customFormat: {
+          name: '',
+          version: '',
+          description: '',
+          licenses: '',
+          repository: '',
+          publisher: '',
+          email: '',
+          url: '',
+          licenseFile: '',
+          licenseText: '',
+          licenseModified: ''
+        }
+      };
+      
+      this.logger.log(`License-checker options: ${JSON.stringify(options)}`);
+      
       // Gerçek lisans analizi yap
       const licenses = await new Promise<any>((resolve, reject) => {
         licenseChecker.init(
-          {
-            start: packageDir,
-            production: false,
-            development: true,
-            json: true
-          },
+          options,
           (err: Error, packages: any) => {
             if (err) {
               this.logger.error(`License-checker error: ${err.message}`);
               reject(err);
             } else {
               this.logger.log(`License-checker found ${Object.keys(packages).length} packages`);
+              // İlk 5 paketi logla
+              const firstFive = Object.entries(packages).slice(0, 5);
+              firstFive.forEach(([key, data]: [string, any]) => {
+                this.logger.log(`Package: ${key}, License: ${data.licenses || data.license || 'Unknown'}`);
+              });
               resolve(packages);
             }
           }
