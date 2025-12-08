@@ -331,12 +331,27 @@ export class AnalysisService {
     };
 
     try {
-      // license-checker options
+      // Test: Komut satırından license-checker çalıştır
+      try {
+        const { stdout } = await execAsync(`npx license-checker --start ${packageDir} --json --production --development`, {
+          timeout: 30000,
+          cwd: packageDir
+        });
+        this.logger.log(`CLI license-checker output (first 1000 chars): ${stdout.substring(0, 1000)}`);
+      } catch (cliError) {
+        this.logger.error(`CLI license-checker failed: ${cliError.message}`);
+      }
+      
+      // license-checker options - TÜM bağımlılıklar için
       const options = {
         start: packageDir,
         production: false,
         development: true,
         json: true,
+        direct: false,  // TÜM bağımlılıklar (sadece direct değil)
+        excludePrivatePackages: false,
+        onlyAllow: '',
+        exclude: '',
         customFormat: {
           name: '',
           version: '',
@@ -364,9 +379,9 @@ export class AnalysisService {
               reject(err);
             } else {
               this.logger.log(`License-checker found ${Object.keys(packages).length} packages`);
-              // İlk 5 paketi logla
-              const firstFive = Object.entries(packages).slice(0, 5);
-              firstFive.forEach(([key, data]: [string, any]) => {
+              // İlk 10 paketi logla
+              const firstTen = Object.entries(packages).slice(0, 10);
+              firstTen.forEach(([key, data]: [string, any]) => {
                 this.logger.log(`Package: ${key}, License: ${data.licenses || data.license || 'Unknown'}`);
               });
               resolve(packages);
