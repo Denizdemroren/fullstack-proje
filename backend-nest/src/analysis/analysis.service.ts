@@ -256,6 +256,16 @@ export class AnalysisService {
     }
 
     const packageDir = path.dirname(packageJsonPath);
+    this.logger.log(`Package directory: ${packageDir}`);
+this.logger.log(`Package.json path: ${packageJsonPath}`);
+
+// package.json içeriğini logla
+try {
+  const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
+  this.logger.log(`Package.json content (first 500 chars): ${pkgContent.substring(0, 500)}`);
+} catch (err) {
+  this.logger.error(`Cannot read package.json: ${err.message}`);
+}
     this.logger.log(`Starting license-checker for directory: ${packageDir}`);
     
     const report: any = {
