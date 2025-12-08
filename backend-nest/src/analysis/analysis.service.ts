@@ -344,17 +344,18 @@ export class AnalysisService {
       
       // license-checker options - TÜM bağımlılıklar için
       // Doğru license-checker options
+// Doğru license-checker options - Sadece geçerli alanlar
 const options = {
   start: packageDir,
-  production: true,  // Sadece production dependencies
-  development: false,
+  production: false,  // Hem production hem development
+  development: true,
   json: true,
-  direct: false,  // Tüm bağımlılıkları al
+  direct: false,
   excludePrivatePackages: false,
   onlyAllow: '',
-  exclude: '',
-  customPath: undefined,  // Özel format kullanma
-  customFormat: undefined  // Özel format kullanma
+  exclude: ''
+  // NOT: customPath ve customFormat ekleme!
+  // NOT: packages alanı ekleme!
 };
       
       this.logger.log(`License-checker options: ${JSON.stringify(options)}`);
