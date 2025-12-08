@@ -157,10 +157,10 @@ export class AnalysisService {
           this.logger.warn(`npm ci failed: ${installError.message}`);
           // Fallback: npm install --ignore-scripts
           try {
-            await execAsync('npm install --production --ignore-scripts', {
-              timeout: 180000,
-              cwd: finalRepoPath
-            });
+            await execAsync('npm ci --ignore-scripts', {
+  timeout: 180000,
+  cwd: finalRepoPath
+});
             this.logger.log(`Dependencies installed with npm install`);
           } catch (fallbackError) {
             this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
