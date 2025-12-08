@@ -343,29 +343,18 @@ export class AnalysisService {
       }
       
       // license-checker options - TÜM bağımlılıklar için
-      const options = {
+      // Doğru license-checker options
+const options = {
   start: packageDir,
-  production: false,
-  development: true,
+  production: true,  // Sadece production dependencies
+  development: false,
   json: true,
-  direct: false,
-  packages: path.join(packageDir, 'node_modules'), // ← BUNU EKLE
+  direct: false,  // Tüm bağımlılıkları al
   excludePrivatePackages: false,
   onlyAllow: '',
   exclude: '',
-  customFormat: {
-    name: '',
-    version: '',
-    description: '',
-    licenses: '',
-    repository: '',
-    publisher: '',
-    email: '',
-    url: '',
-    licenseFile: '',
-    licenseText: '',
-    licenseModified: ''
-  }
+  customPath: undefined,  // Özel format kullanma
+  customFormat: undefined  // Özel format kullanma
 };
       
       this.logger.log(`License-checker options: ${JSON.stringify(options)}`);
