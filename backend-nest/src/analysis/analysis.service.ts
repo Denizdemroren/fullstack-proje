@@ -289,12 +289,23 @@ export class AnalysisService {
     this.logger.log(`Package directory: ${packageDir}`);
     this.logger.log(`Package.json path: ${packageJsonPath}`);
 
-    // package.json içeriğini logla
+    // DEBUG: Tüm bağımlılıkları logla
+    let pkgJson: any = {};
     try {
       const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
-      this.logger.log(`Package.json content (first 500 chars): ${pkgContent.substring(0, 500)}`);
+      pkgJson = JSON.parse(pkgContent);
+      this.logger.log(`=== PACKAGE.JSON ANALYSIS ===`);
+      this.logger.log(`Project: ${pkgJson.name}@${pkgJson.version}`);
+      this.logger.log(`License: ${pkgJson.license || 'Unknown'}`);
+      this.logger.log(`Production dependencies: ${Object.keys(pkgJson.dependencies || {}).length}`);
+      this.logger.log(`Dev dependencies: ${Object.keys(pkgJson.devDependencies || {}).length}`);
+      
+      // İlk 10 bağımlılığı listele
+      const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+      const depList = Object.keys(allDeps).slice(0, 10);
+      this.logger.log(`First 10 dependencies: ${depList.join(', ')}`);
     } catch (err) {
-      this.logger.error(`Cannot read package.json: ${err.message}`);
+      this.logger.error(`Cannot parse package.json: ${err.message}`);
     }
     
     // Debug: node_modules var mı?
@@ -303,6 +314,7 @@ export class AnalysisService {
     if (fs.existsSync(nodeModulesPath)) {
       try {
         const nodeModulesContent = await fs.promises.readdir(nodeModulesPath);
+        this.logger.log(`Total items in node_modules: ${nodeModulesContent.length}`);
         this.logger.log(`First 10 items in node_modules: ${nodeModulesContent.slice(0, 10).join(', ')}`);
       } catch (err) {
         this.logger.error(`Cannot read node_modules: ${err.message}`);
@@ -334,29 +346,26 @@ export class AnalysisService {
       // Test: Komut satırından license-checker çalıştır
       try {
         const { stdout } = await execAsync(`npx license-checker --start ${packageDir} --json --production --development`, {
-          timeout: 30000,
+          timeout: 60000,  // 60 saniye timeout
           cwd: packageDir
         });
-        this.logger.log(`CLI license-checker output (first 1000 chars): ${stdout.substring(0, 1000)}`);
+        this.logger.log(`CLI license-checker output (first 2000 chars): ${stdout.substring(0, 2000)}`);
+        this.logger.log(`CLI license-checker output length: ${stdout.length} chars`);
       } catch (cliError) {
         this.logger.error(`CLI license-checker failed: ${cliError.message}`);
       }
       
-      // license-checker options - TÜM bağımlılıklar için
-      // Doğru license-checker options
-// Doğru license-checker options - Sadece geçerli alanlar
-const options = {
-  start: packageDir,
-  production: false,  // Hem production hem development
-  development: true,
-  json: true,
-  direct: false,
-  excludePrivatePackages: false,
-  onlyAllow: '',
-  exclude: ''
-  // NOT: customPath ve customFormat ekleme!
-  // NOT: packages alanı ekleme!
-};
+      // Doğru license-checker options - Sadece geçerli alanlar
+      const options = {
+        start: packageDir,
+        production: false,  // Hem production hem development
+        development: true,
+        json: true,
+        direct: false,
+        excludePrivatePackages: false,
+        onlyAllow: '',
+        exclude: ''
+      };
       
       this.logger.log(`License-checker options: ${JSON.stringify(options)}`);
       
@@ -367,14 +376,38 @@ const options = {
           (err: Error, packages: any) => {
             if (err) {
               this.logger.error(`License-checker error: ${err.message}`);
+              this.logger.error(`Error stack: ${err.stack?.substring(0, 500)}`);
               reject(err);
             } else {
-              this.logger.log(`License-checker found ${Object.keys(packages).length} packages`);
-              // İlk 10 paketi logla
-              const firstTen = Object.entries(packages).slice(0, 10);
-              firstTen.forEach(([key, data]: [string, any]) => {
-                this.logger.log(`Package: ${key}, License: ${data.licenses || data.license || 'Unknown'}`);
-              });
+              this.logger.log(`=== LICENSE-CHECKER RESULTS ===`);
+              this.logger.log(`Total packages found: ${Object.keys(packages).length}`);
+              
+              if (Object.keys(packages).length === 0) {
+                this.logger.warn(`WARNING: No packages found by license-checker!`);
+                this.logger.warn(`This could mean:`);
+                this.logger.warn(`1. node_modules not properly installed`);
+                this.logger.warn(`2. license-checker scanning wrong directory`);
+                this.logger.warn(`3. All packages are private/excluded`);
+              } else {
+                // İlk 20 paketi logla
+                const firstTwenty = Object.entries(packages).slice(0, 20);
+                this.logger.log(`First ${firstTwenty.length} packages:`);
+                firstTwenty.forEach(([key, data]: [string, any]) => {
+                  this.logger.log(`✓ ${key}: ${data.licenses || data.license || 'Unknown'}`);
+                });
+                
+                // Toplam sayıları logla
+                const licenseCounts: { [key: string]: number } = {};
+                Object.values(packages).forEach((data: any) => {
+                  const license = data.licenses || data.license || 'Unknown';
+                  licenseCounts[license] = (licenseCounts[license] || 0) + 1;
+                });
+                
+                this.logger.log(`License distribution:`);
+                Object.entries(licenseCounts).forEach(([license, count]) => {
+                  this.logger.log(`  ${license}: ${count} packages`);
+                });
+              }
               resolve(packages);
             }
           }
@@ -442,10 +475,7 @@ const options = {
 
       // Ana proje lisansını da ekle
       try {
-        const packageJson = JSON.parse(
-          await fs.promises.readFile(packageJsonPath, 'utf-8')
-        );
-        report.projectLicense = packageJson.license || 'Unknown';
+        report.projectLicense = pkgJson.license || 'Unknown';
         
         const projectLicenseStr = typeof report.projectLicense === 'string' 
           ? report.projectLicense 
@@ -461,6 +491,7 @@ const options = {
 
     } catch (error: any) {
       this.logger.error(`License analysis failed: ${error.message}`);
+      this.logger.error(`Error stack: ${error.stack}`);
       report.summary.error = error.message;
       
       // Fallback: Eski demo mod
