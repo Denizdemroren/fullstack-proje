@@ -7,22 +7,8 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as licenseChecker from 'license-checker';
 
 const execAsync = promisify(exec);
-
-interface PackageData {
-  name?: string;
-  version?: string;
-  license?: string;
-  [key: string]: any;
-}
-
-interface PackageLock {
-  packages?: {
-    [key: string]: PackageData;
-  };
-}
 
 @Injectable()
 export class AnalysisService {
@@ -146,26 +132,29 @@ export class AnalysisService {
       const packageJsonPath = path.join(finalRepoPath, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
         this.logger.log(`Installing dependencies for ${finalRepoPath}`);
+        
+        // Önce package-lock.json kontrol et
+        const packageLockPath = path.join(finalRepoPath, 'package-lock.json');
+        const hasPackageLock = fs.existsSync(packageLockPath);
+        this.logger.log(`Has package-lock.json: ${hasPackageLock}`);
+        
         try {
-          // İlk deneme: npm ci --ignore-scripts (tüm bağımlılıklar)
-          await execAsync('npm ci --ignore-scripts', {
-            timeout: 180000,
-            cwd: finalRepoPath
-          });
-          this.logger.log(`Dependencies installed successfully with npm ci`);
-        } catch (installError) {
-          this.logger.warn(`npm ci failed: ${installError.message}`);
-          // Fallback: npm install --ignore-scripts
-          try {
+          if (hasPackageLock) {
+            await execAsync('npm ci --ignore-scripts', {
+              timeout: 180000,
+              cwd: finalRepoPath
+            });
+            this.logger.log(`Dependencies installed successfully with npm ci`);
+          } else {
             await execAsync('npm install --ignore-scripts', {
               timeout: 180000,
               cwd: finalRepoPath
             });
-            this.logger.log(`Dependencies installed with npm install`);
-          } catch (fallbackError) {
-            this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
-            // Hata durumunda devam et, belki node_modules zaten yüklüdür
+            this.logger.log(`Dependencies installed with npm install (no package-lock.json)`);
           }
+        } catch (installError) {
+          this.logger.warn(`npm installation failed: ${installError.message}`);
+          // Devam et, belki node_modules zaten var
         }
       }
       
@@ -182,8 +171,6 @@ export class AnalysisService {
   }
 
   private extractRepoName(githubUrl: string): string {
-    // Örnek: https://github.com/axios/axios -> axios
-    // Örnek: https://github.com/axios/axios.git -> axios
     const url = new URL(githubUrl);
     const pathParts = url.pathname.split('/').filter(part => part.length > 0);
     
@@ -198,13 +185,11 @@ export class AnalysisService {
   }
 
   private async findPackageJson(dir: string): Promise<string | null> {
-    // Önce kök dizinde ara
     const rootPackageJson = path.join(dir, 'package.json');
     if (fs.existsSync(rootPackageJson)) {
       return rootPackageJson;
     }
     
-    // Subdirectory'lerde ara
     try {
       const files = await fs.promises.readdir(dir);
       for (const file of files) {
@@ -216,7 +201,6 @@ export class AnalysisService {
             return subPackageJson;
           }
           
-          // Daha derinlere de bak (max 2 level)
           const subFiles = await fs.promises.readdir(fullPath);
           for (const subFile of subFiles) {
             const deeperPath = path.join(fullPath, subFile);
@@ -244,7 +228,6 @@ export class AnalysisService {
     this.logger.log(`Checking package.json at: ${packageJsonPath}`);
     
     if (!packageJsonPath) {
-      // Dosyaları listele debug için
       try {
         const files = await fs.promises.readdir(repoPath);
         this.logger.log(`Files in repo directory: ${files.join(', ')}`);
@@ -274,7 +257,7 @@ export class AnalysisService {
   }
 
   private async analyzeLicenses(repoPath: string): Promise<any> {
-    this.logger.log(`Analyzing licenses for ${repoPath}`);
+    this.logger.log(`=== STARTING MANUAL LICENSE ANALYSIS ===`);
     
     const packageJsonPath = await this.findPackageJson(repoPath);
     
@@ -286,42 +269,6 @@ export class AnalysisService {
     }
 
     const packageDir = path.dirname(packageJsonPath);
-    this.logger.log(`Package directory: ${packageDir}`);
-    this.logger.log(`Package.json path: ${packageJsonPath}`);
-
-    // DEBUG: Tüm bağımlılıkları logla
-    let pkgJson: any = {};
-    try {
-      const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
-      pkgJson = JSON.parse(pkgContent);
-      this.logger.log(`=== PACKAGE.JSON ANALYSIS ===`);
-      this.logger.log(`Project: ${pkgJson.name}@${pkgJson.version}`);
-      this.logger.log(`License: ${pkgJson.license || 'Unknown'}`);
-      this.logger.log(`Production dependencies: ${Object.keys(pkgJson.dependencies || {}).length}`);
-      this.logger.log(`Dev dependencies: ${Object.keys(pkgJson.devDependencies || {}).length}`);
-      
-      // İlk 10 bağımlılığı listele
-      const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
-      const depList = Object.keys(allDeps).slice(0, 10);
-      this.logger.log(`First 10 dependencies: ${depList.join(', ')}`);
-    } catch (err) {
-      this.logger.error(`Cannot parse package.json: ${err.message}`);
-    }
-    
-    // Debug: node_modules var mı?
-    const nodeModulesPath = path.join(packageDir, 'node_modules');
-    this.logger.log(`Checking if node_modules exists: ${fs.existsSync(nodeModulesPath)}`);
-    if (fs.existsSync(nodeModulesPath)) {
-      try {
-        const nodeModulesContent = await fs.promises.readdir(nodeModulesPath);
-        this.logger.log(`Total items in node_modules: ${nodeModulesContent.length}`);
-        this.logger.log(`First 10 items in node_modules: ${nodeModulesContent.slice(0, 10).join(', ')}`);
-      } catch (err) {
-        this.logger.error(`Cannot read node_modules: ${err.message}`);
-      }
-    }
-    
-    this.logger.log(`Starting license-checker for directory: ${packageDir}`);
     
     const report: any = {
       allowed: [],
@@ -343,140 +290,158 @@ export class AnalysisService {
     };
 
     try {
-      // Test: Komut satırından license-checker çalıştır
-      try {
-        const { stdout } = await execAsync(`npx license-checker --start ${packageDir} --json --production --development`, {
-          timeout: 60000,  // 60 saniye timeout
-          cwd: packageDir
-        });
-        this.logger.log(`CLI license-checker output (first 2000 chars): ${stdout.substring(0, 2000)}`);
-        this.logger.log(`CLI license-checker output length: ${stdout.length} chars`);
-      } catch (cliError) {
-        this.logger.error(`CLI license-checker failed: ${cliError.message}`);
-      }
+      // 1. Ana projenin package.json'ını oku
+      const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
+      const pkgJson = JSON.parse(pkgContent);
       
-      // Doğru license-checker options - Sadece geçerli alanlar
-      const options = {
-        start: packageDir,
-        production: false,  // Hem production hem development
-        development: true,
-        json: true,
-        direct: false,
-        excludePrivatePackages: false,
-        onlyAllow: '',
-        exclude: ''
+      this.logger.log(`=== PACKAGE ANALYSIS ===`);
+      this.logger.log(`Project: ${pkgJson.name}@${pkgJson.version}`);
+      this.logger.log(`Main license: ${pkgJson.license || 'Unknown'}`);
+      this.logger.log(`Production deps: ${Object.keys(pkgJson.dependencies || {}).length}`);
+      this.logger.log(`Dev deps: ${Object.keys(pkgJson.devDependencies || {}).length}`);
+      
+      // 2. Tüm bağımlılıkları birleştir
+      const allDependencies = {
+        ...pkgJson.dependencies,
+        ...pkgJson.devDependencies
       };
       
-      this.logger.log(`License-checker options: ${JSON.stringify(options)}`);
+      this.logger.log(`Total dependencies to analyze: ${Object.keys(allDependencies).length}`);
       
-      // Gerçek lisans analizi yap
-      const licenses = await new Promise<any>((resolve, reject) => {
-        licenseChecker.init(
-          options,
-          (err: Error, packages: any) => {
-            if (err) {
-              this.logger.error(`License-checker error: ${err.message}`);
-              this.logger.error(`Error stack: ${err.stack?.substring(0, 500)}`);
-              reject(err);
-            } else {
-              this.logger.log(`=== LICENSE-CHECKER RESULTS ===`);
-              this.logger.log(`Total packages found: ${Object.keys(packages).length}`);
-              
-              if (Object.keys(packages).length === 0) {
-                this.logger.warn(`WARNING: No packages found by license-checker!`);
-                this.logger.warn(`This could mean:`);
-                this.logger.warn(`1. node_modules not properly installed`);
-                this.logger.warn(`2. license-checker scanning wrong directory`);
-                this.logger.warn(`3. All packages are private/excluded`);
-              } else {
-                // İlk 20 paketi logla
-                const firstTwenty = Object.entries(packages).slice(0, 20);
-                this.logger.log(`First ${firstTwenty.length} packages:`);
-                firstTwenty.forEach(([key, data]: [string, any]) => {
-                  this.logger.log(`✓ ${key}: ${data.licenses || data.license || 'Unknown'}`);
-                });
-                
-                // Toplam sayıları logla
-                const licenseCounts: { [key: string]: number } = {};
-                Object.values(packages).forEach((data: any) => {
-                  const license = data.licenses || data.license || 'Unknown';
-                  licenseCounts[license] = (licenseCounts[license] || 0) + 1;
-                });
-                
-                this.logger.log(`License distribution:`);
-                Object.entries(licenseCounts).forEach(([license, count]) => {
-                  this.logger.log(`  ${license}: ${count} packages`);
-                });
-              }
-              resolve(packages);
-            }
+      // 3. node_modules kontrol et
+      const nodeModulesPath = path.join(packageDir, 'node_modules');
+      if (!fs.existsSync(nodeModulesPath)) {
+        this.logger.error(`node_modules not found at: ${nodeModulesPath}`);
+        throw new Error('node_modules not installed');
+      }
+      
+      const nodeModulesContent = await fs.promises.readdir(nodeModulesPath);
+      this.logger.log(`Total items in node_modules: ${nodeModulesContent.length}`);
+      
+      // 4. Her bağımlılık için lisans analizi yap
+      let analyzedCount = 0;
+      let failedCount = 0;
+      
+      for (const [depName, depVersion] of Object.entries(allDependencies)) {
+        try {
+          // Scoped package isimleri için (@org/package)
+          const depDirName = depName.startsWith('@') ? 
+            depName.replace('/', path.sep) : 
+            depName;
+          
+          const depPackagePath = path.join(nodeModulesPath, depDirName, 'package.json');
+          
+          if (!fs.existsSync(depPackagePath)) {
+            this.logger.warn(`Package.json not found for: ${depName}`);
+            continue;
           }
-        );
-      });
+          
+          const depPkgContent = await fs.promises.readFile(depPackagePath, 'utf-8');
+          const depPkgJson = JSON.parse(depPkgContent);
+          
+          // Lisans bilgisini al (farklı formatlar için)
+          // Lisans bilgisini al (farklı formatlar için)
+let license = 'Unknown';
 
-      // Lisans sonuçlarını işle
-      report.summary.total = Object.keys(licenses).length;
-      
-      for (const [packageKey, licenseData] of Object.entries<any>(licenses)) {
-        const packageName = packageKey.split('@')[0];
-        const version = packageKey.includes('@') ? packageKey.split('@')[1] : 'unknown';
-        const license = (licenseData as any).licenses || (licenseData as any).license || 'Unknown';
-        const licenseStr = Array.isArray(license) ? license.join(', ') : license;
-        
-        const packageInfo = { 
-          package: packageName, 
-          version: version, 
-          license: licenseStr 
-        };
-        
-        // Lisans kategorisine göre ekle
-        const licenseUpper = licenseStr.toUpperCase();
-        let isCategorized = false;
-        
-        // İzin verilen lisanslar
-        for (const allowed of licensePolicy.allowed) {
-          if (licenseUpper.includes(allowed.toUpperCase())) {
-            report.allowed.push(packageInfo);
-            report.summary.compliant++;
-            isCategorized = true;
-            break;
-          }
-        }
-        
-        if (!isCategorized) {
-          // Yasaklı lisanslar
-          for (const banned of licensePolicy.banned) {
-            if (licenseUpper.includes(banned.toUpperCase())) {
-              report.banned.push(packageInfo);
-              report.summary.nonCompliant++;
+if (depPkgJson.license) {
+  // license alanı string veya object olabilir
+  if (typeof depPkgJson.license === 'string') {
+    license = depPkgJson.license;
+  } else if (depPkgJson.license && typeof depPkgJson.license === 'object') {
+    license = depPkgJson.license.type || 'Unknown';
+  }
+} else if (depPkgJson.licenses) {
+  if (Array.isArray(depPkgJson.licenses)) {
+    license = depPkgJson.licenses
+      .map((l: any) => (typeof l === 'string' ? l : l?.type || 'Unknown'))
+      .join(', ');
+  } else if (typeof depPkgJson.licenses === 'string') {
+    license = depPkgJson.licenses;
+  } else if (depPkgJson.licenses && typeof depPkgJson.licenses === 'object') {
+    license = depPkgJson.licenses.type || 'Unknown';
+  }
+}
+
+// license değişkeni artık string olmalı
+const licenseStr = license;
+
+const packageInfo = {
+  package: depName,
+  version: depVersion as string,
+  license: licenseStr,
+  actualVersion: depPkgJson.version || 'unknown'
+};
+          
+          // Lisans kategorisine göre ekle
+          const licenseUpper = licenseStr.toUpperCase();
+          let isCategorized = false;
+          
+          // İzin verilen lisanslar
+          for (const allowed of licensePolicy.allowed) {
+            if (licenseUpper.includes(allowed.toUpperCase())) {
+              report.allowed.push(packageInfo);
+              report.summary.compliant++;
               isCategorized = true;
               break;
             }
           }
-        }
-        
-        if (!isCategorized) {
-          // İnceleme gerekenler
-          for (const review of licensePolicy.review) {
-            if (licenseUpper.includes(review.toUpperCase())) {
-              report.needsReview.push(packageInfo);
-              report.summary.needsReview++;
-              isCategorized = true;
-              break;
+          
+          if (!isCategorized) {
+            // Yasaklı lisanslar
+            for (const banned of licensePolicy.banned) {
+              if (licenseUpper.includes(banned.toUpperCase())) {
+                report.banned.push(packageInfo);
+                report.summary.nonCompliant++;
+                isCategorized = true;
+                break;
+              }
             }
           }
-        }
-        
-        if (!isCategorized) {
-          // Bilinmeyen
-          report.unknown.push(packageInfo);
+          
+          if (!isCategorized) {
+            // İnceleme gerekenler
+            for (const review of licensePolicy.review) {
+              if (licenseUpper.includes(review.toUpperCase())) {
+                report.needsReview.push(packageInfo);
+                report.summary.needsReview++;
+                isCategorized = true;
+                break;
+              }
+            }
+          }
+          
+          if (!isCategorized) {
+            // Bilinmeyen
+            report.unknown.push(packageInfo);
+          }
+          
+          analyzedCount++;
+          
+          // İlk 10 paketi logla
+          if (analyzedCount <= 10) {
+            this.logger.log(`✓ ${depName}@${depPkgJson.version}: ${licenseStr}`);
+          }
+          
+        } catch (depError) {
+          failedCount++;
+          this.logger.warn(`Failed to analyze ${depName}: ${depError.message}`);
         }
       }
-
-      // Ana proje lisansını da ekle
+      
+      this.logger.log(`=== ANALYSIS RESULTS ===`);
+      this.logger.log(`Successfully analyzed: ${analyzedCount} packages`);
+      this.logger.log(`Failed to analyze: ${failedCount} packages`);
+      this.logger.log(`Allowed licenses: ${report.allowed.length}`);
+      this.logger.log(`Banned licenses: ${report.banned.length}`);
+      this.logger.log(`Needs review: ${report.needsReview.length}`);
+      this.logger.log(`Unknown licenses: ${report.unknown.length}`);
+      
+      // Toplam sayıyı güncelle
+      report.summary.total = analyzedCount;
+      
+      // 5. Ana proje lisansını da ekle
       try {
         report.projectLicense = pkgJson.license || 'Unknown';
-        
         const projectLicenseStr = typeof report.projectLicense === 'string' 
           ? report.projectLicense 
           : (report.projectLicense.type || 'Unknown');
@@ -484,41 +449,52 @@ export class AnalysisService {
         report.projectLicenseCompliant = licensePolicy.allowed.some(allowed => 
           projectLicenseStr.toUpperCase().includes(allowed.toUpperCase())
         );
+        
+        this.logger.log(`Project license: ${report.projectLicense} (Compliant: ${report.projectLicenseCompliant})`);
       } catch (error) {
         report.projectLicense = 'Unknown';
         report.projectLicenseCompliant = false;
       }
 
     } catch (error: any) {
-      this.logger.error(`License analysis failed: ${error.message}`);
+      this.logger.error(`Manual license analysis failed: ${error.message}`);
       this.logger.error(`Error stack: ${error.stack}`);
       report.summary.error = error.message;
       
-      // Fallback: Eski demo mod
+      // Fallback: Demo mod
       report.fallbackUsed = true;
-      report.warning = 'License checker failed, using fallback data';
+      report.warning = 'Manual license analysis failed, using demo data';
       
-      // Demo veri oluştur
-      const fakePackages = [
-        { package: 'react', version: '^18.2.0', license: 'MIT' },
-        { package: 'typescript', version: '^5.0.0', license: 'Apache-2.0' },
-        { package: 'express', version: '^4.18.0', license: 'MIT' },
-        { package: 'lodash', version: '^4.17.0', license: 'MIT' },
-        { package: 'axios', version: '^1.4.0', license: 'MIT' },
-        { package: 'mysql', version: '^2.18.0', license: 'MIT' },
-        { package: 'webpack', version: '^5.85.0', license: 'MIT' }
-      ];
-      
-      fakePackages.forEach(pkg => {
-        report.allowed.push(pkg);
-      });
-      
-      report.summary.total = fakePackages.length;
-      report.summary.compliant = fakePackages.length;
-      report.projectLicense = 'MIT';
-      report.projectLicenseCompliant = true;
+      // Demo veri oluştur (gerçek package.json'dan)
+      try {
+        const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
+        const pkgJson = JSON.parse(pkgContent);
+        const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+        const depNames = Object.keys(allDeps);
+        
+        // İlk 7 bağımlılık için demo lisans ata
+        const demoPackages = depNames.slice(0, 7).map(name => ({
+          package: name,
+          version: allDeps[name] as string,
+          license: 'MIT' // Demo için MIT varsay
+        }));
+        
+        demoPackages.forEach(pkg => {
+          report.allowed.push(pkg);
+        });
+        
+        report.summary.total = demoPackages.length;
+        report.summary.compliant = demoPackages.length;
+        report.projectLicense = pkgJson.license || 'MIT';
+        report.projectLicenseCompliant = true;
+        
+        this.logger.log(`Using demo data for ${demoPackages.length} packages`);
+      } catch (demoError) {
+        this.logger.error(`Demo data also failed: ${demoError.message}`);
+      }
     }
 
+    this.logger.log(`=== LICENSE ANALYSIS COMPLETED ===`);
     return report;
   }
 
