@@ -7,7 +7,6 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as licenseCrawler from 'npm-license-crawler';
 import * as spdxCorrect from 'spdx-correct';
 
 const execAsync = promisify(exec);
@@ -122,11 +121,21 @@ export class AnalysisService {
         const packageDir = path.dirname(packageJsonPath);
         
         try {
-          await execAsync('npm install --ignore-scripts --production=false', {
-            timeout: 300000,
-            cwd: packageDir
-          });
-          this.logger.log(`Dependencies installed successfully`);
+          // Önce package-lock.json kontrol et
+          const packageLockPath = path.join(packageDir, 'package-lock.json');
+          if (fs.existsSync(packageLockPath)) {
+            await execAsync('npm ci --ignore-scripts', {
+              timeout: 300000,
+              cwd: packageDir
+            });
+            this.logger.log(`Dependencies installed with npm ci`);
+          } else {
+            await execAsync('npm install --ignore-scripts', {
+              timeout: 300000,
+              cwd: packageDir
+            });
+            this.logger.log(`Dependencies installed with npm install`);
+          }
         } catch (installError) {
           this.logger.warn(`Installation failed: ${installError.message}`);
           // Continue without installation
@@ -200,7 +209,7 @@ export class AnalysisService {
   }
 
   private async analyzeLicenses(repoPath: string): Promise<any> {
-    this.logger.log(`=== STARTING PROFESSIONAL LICENSE ANALYSIS ===`);
+    this.logger.log(`=== STARTING LICENSE ANALYSIS ===`);
     
     const packageJsonPath = await this.findPackageJson(repoPath);
     
@@ -233,92 +242,121 @@ export class AnalysisService {
     };
 
     try {
-      // 1. npm-license-crawler ile profesyonel analiz
+      // 1. license-checker kullan (daha güvenilir)
+      const licenseChecker = require('license-checker');
+      
       const licenses = await new Promise<any>((resolve, reject) => {
-        licenseCrawler.crawl({
+        licenseChecker.init({
           start: packageDir,
           production: true,
           development: true,
           json: true,
-          onlyDirectDependencies: false,
-          exclude: []
+          direct: false,
+          excludePrivatePackages: false,
+          onlyAllow: '',
+          exclude: ''
         }, (error: Error, result: any) => {
           if (error) {
-            this.logger.error(`License crawler error: ${error.message}`);
+            this.logger.error(`License checker error: ${error.message}`);
             reject(error);
           } else {
-            this.logger.log(`License crawler found ${Object.keys(result).length} packages`);
-            resolve(result);
+            this.logger.log(`License checker found ${Object.keys(result || {}).length} packages`);
+            resolve(result || {});
           }
         });
       });
 
-      // 2. Lisansları kategorize et
+      // 2. Eğer licenses boşsa
+      if (!licenses || Object.keys(licenses).length === 0) {
+        this.logger.warn('License checker returned empty result, using fallback');
+        return this.fallbackLicenseAnalysis(packageJsonPath);
+      }
+
+      // 3. Lisansları kategorize et
+      let analyzedCount = 0;
+      
       Object.entries(licenses).forEach(([packageKey, data]: [string, any]) => {
-        const packageName = packageKey.split('@')[0];
-        const version = packageKey.includes('@') ? packageKey.split('@')[1] : 'unknown';
-        
-        // Lisans bilgisini al ve SPDX formatına düzelt
-        let license = data.licenses || 'Unknown';
-        if (typeof license === 'string') {
-          const corrected = spdxCorrect(license);
-          if (corrected) license = corrected;
-        }
-
-        const packageInfo = {
-          package: packageName,
-          version: version,
-          license: license,
-          repository: data.repository || '',
-          publisher: data.publisher || '',
-          email: data.email || ''
-        };
-
-        // Lisans kategorizasyonu
-        const licenseStr = typeof license === 'string' ? license.toUpperCase() : 'UNKNOWN';
-        let isCategorized = false;
-
-        // İzin verilen lisanslar
-        for (const allowed of licensePolicy.allowed) {
-          if (licenseStr.includes(allowed.toUpperCase())) {
-            report.allowed.push(packageInfo);
-            report.summary.compliant++;
-            isCategorized = true;
-            break;
+        try {
+          const packageName = packageKey.split('@')[0];
+          const version = packageKey.includes('@') ? packageKey.split('@')[1] : 'unknown';
+          
+          // Lisans bilgisini al
+          let license = data.licenses || data.license || 'Unknown';
+          if (Array.isArray(license)) {
+            license = license.map(l => l.type || l).join(', ');
           }
-        }
+          
+          // SPDX formatına düzelt
+          if (typeof license === 'string') {
+            const corrected = spdxCorrect(license);
+            if (corrected) license = corrected;
+          }
 
-        if (!isCategorized) {
-          // Yasaklı lisanslar
-          for (const banned of licensePolicy.banned) {
-            if (licenseStr.includes(banned.toUpperCase())) {
-              report.banned.push(packageInfo);
-              report.summary.nonCompliant++;
+          const packageInfo = {
+            package: packageName,
+            version: version,
+            license: license,
+            repository: data.repository || '',
+            publisher: data.publisher || '',
+            email: data.email || ''
+          };
+
+          // Lisans kategorizasyonu
+          const licenseStr = typeof license === 'string' ? license.toUpperCase() : 'UNKNOWN';
+          let isCategorized = false;
+
+          // İzin verilen lisanslar
+          for (const allowed of licensePolicy.allowed) {
+            if (licenseStr.includes(allowed.toUpperCase())) {
+              report.allowed.push(packageInfo);
+              report.summary.compliant++;
               isCategorized = true;
               break;
             }
           }
-        }
 
-        if (!isCategorized) {
-          // İnceleme gerekenler
-          for (const review of licensePolicy.review) {
-            if (licenseStr.includes(review.toUpperCase())) {
-              report.needsReview.push(packageInfo);
-              report.summary.needsReview++;
-              isCategorized = true;
-              break;
+          if (!isCategorized) {
+            // Yasaklı lisanslar
+            for (const banned of licensePolicy.banned) {
+              if (licenseStr.includes(banned.toUpperCase())) {
+                report.banned.push(packageInfo);
+                report.summary.nonCompliant++;
+                isCategorized = true;
+                break;
+              }
             }
           }
-        }
 
-        if (!isCategorized) {
-          // Bilinmeyen
-          report.unknown.push(packageInfo);
+          if (!isCategorized) {
+            // İnceleme gerekenler
+            for (const review of licensePolicy.review) {
+              if (licenseStr.includes(review.toUpperCase())) {
+                report.needsReview.push(packageInfo);
+                report.summary.needsReview++;
+                isCategorized = true;
+                break;
+              }
+            }
+          }
+
+          if (!isCategorized) {
+            // Bilinmeyen
+            report.unknown.push(packageInfo);
+          }
+
+          analyzedCount++;
+          
+          // İlk 15 paketi logla
+          if (analyzedCount <= 15) {
+            this.logger.log(`📦 ${packageName}@${version}: ${license}`);
+          }
+          
+        } catch (pkgError) {
+          this.logger.warn(`Failed to process package ${packageKey}: ${pkgError.message}`);
         }
       });
 
-      // 3. Ana proje lisansı
+      // 4. Ana proje lisansı
       try {
         const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8');
         const pkgJson = JSON.parse(pkgContent);
@@ -331,31 +369,28 @@ export class AnalysisService {
         report.projectLicenseCompliant = licensePolicy.allowed.some(allowed => 
           projectLicenseStr.includes(allowed.toUpperCase())
         );
+        
+        this.logger.log(`Project license: ${report.projectLicense} (Compliant: ${report.projectLicenseCompliant})`);
       } catch (error) {
         report.projectLicense = 'Unknown';
         report.projectLicenseCompliant = false;
       }
 
-      // 4. Özet
+      // 5. Özet
       report.summary.total = Object.keys(licenses).length;
 
-      this.logger.log(`=== PROFESSIONAL ANALYSIS RESULTS ===`);
+      this.logger.log(`=== ANALYSIS RESULTS ===`);
       this.logger.log(`Total packages: ${report.summary.total}`);
       this.logger.log(`Allowed: ${report.allowed.length}`);
       this.logger.log(`Banned: ${report.banned.length}`);
       this.logger.log(`Needs review: ${report.needsReview.length}`);
       this.logger.log(`Unknown: ${report.unknown.length}`);
 
-      // İlk 10 paketi logla
-      const firstTen = Object.entries(licenses).slice(0, 10);
-      firstTen.forEach(([key, data]: [string, any]) => {
-        this.logger.log(`📦 ${key}: ${data.licenses || 'Unknown'}`);
-      });
-
     } catch (error: any) {
-      this.logger.error(`Professional license analysis failed: ${error.message}`);
+      this.logger.error(`License analysis failed: ${error.message}`);
+      this.logger.error(`Error stack: ${error.stack}`);
       
-      // Fallback: Basit analiz
+      // Fallback
       return this.fallbackLicenseAnalysis(packageJsonPath);
     }
 
@@ -370,16 +405,18 @@ export class AnalysisService {
       const pkgJson = JSON.parse(pkgContent);
       
       const allDeps = {
-        ...pkgJson.dependencies,
-        ...pkgJson.devDependencies
+        ...pkgJson.dependencies || {},
+        ...pkgJson.devDependencies || {}
       };
       
+      const allowedPackages = Object.keys(allDeps).map(name => ({
+        package: name,
+        version: allDeps[name],
+        license: 'MIT (assumed)'
+      }));
+      
       return {
-        allowed: Object.keys(allDeps).map(name => ({
-          package: name,
-          version: allDeps[name],
-          license: 'MIT (assumed)'
-        })),
+        allowed: allowedPackages,
         banned: [],
         needsReview: [],
         unknown: [],
