@@ -102,54 +102,82 @@ export class AnalysisService {
 }
 
   private async cloneRepository(githubUrl: string): Promise<string> {
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'repo-'));
-    const repoName = this.extractRepoName(githubUrl);
-    const repoPath = path.join(tempDir, repoName);
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'repo-'));
+  const repoName = this.extractRepoName(githubUrl);
+  const repoPath = path.join(tempDir, repoName);
+  
+  this.logger.log(`Cloning ${githubUrl} to ${tempDir}`);
+  this.logger.log(`Expected repo path: ${repoPath}`);
+  
+  try {
+    // 1. Repo'yu clone et
+    await execAsync(`git clone ${githubUrl} ${repoPath}`, {
+      timeout: 120000,
+      cwd: tempDir
+    });
     
-    this.logger.log(`Cloning ${githubUrl} to ${tempDir}`);
-    this.logger.log(`Expected repo path: ${repoPath}`);
+    this.logger.log(`Clone successful. Checking if repo exists at: ${repoPath}`);
     
-    try {
-      // Önce tempDir içine clone et
-      await execAsync(`git clone ${githubUrl} ${repoPath}`, {
-        timeout: 120000, // 120 saniye timeout
-        cwd: tempDir
-      });
+    let finalRepoPath = repoPath;
+    
+    // Repo'nun var olduğunu kontrol et
+    if (!fs.existsSync(repoPath)) {
+      this.logger.error(`Repo path does not exist after clone: ${repoPath}`);
+      const files = await fs.promises.readdir(tempDir);
+      this.logger.log(`Files in temp directory: ${files.join(', ')}`);
       
-      this.logger.log(`Clone successful. Checking if repo exists at: ${repoPath}`);
-      
-      // Repo'nun var olduğunu kontrol et
-      if (!fs.existsSync(repoPath)) {
-        this.logger.error(`Repo path does not exist after clone: ${repoPath}`);
-        // Alternatif path'i kontrol et - belki doğrudan tempDir'e clone olmuştur
-        const files = await fs.promises.readdir(tempDir);
-        this.logger.log(`Files in temp directory: ${files.join(', ')}`);
-        
-        // İlk directory'yi bul
-        for (const file of files) {
-          const fullPath = path.join(tempDir, file);
-          const stat = await fs.promises.stat(fullPath);
-          if (stat.isDirectory()) {
-            this.logger.log(`Found directory: ${fullPath}, using as repo path`);
-            return fullPath;
-          }
+      // İlk directory'yi bul
+      for (const file of files) {
+        const fullPath = path.join(tempDir, file);
+        const stat = await fs.promises.stat(fullPath);
+        if (stat.isDirectory()) {
+          this.logger.log(`Found directory: ${fullPath}, using as repo path`);
+          finalRepoPath = fullPath;
+          break;
         }
-        
+      }
+      
+      if (finalRepoPath === repoPath) {
         throw new Error(`Repository directory not found after clone`);
       }
-      
-      return repoPath;
-    } catch (error) {
-      this.logger.error(`Clone failed: ${error.message}`);
-      // Temp directory'yi temizle
-      try {
-        await fs.promises.rm(tempDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        this.logger.warn(`Failed to clean up temp directory: ${cleanupError.message}`);
-      }
-      throw new Error(`Failed to clone repository: ${error.message}`);
     }
+    
+    // 2. Bağımlılıkları yükle (sadece production)
+    const packageJsonPath = path.join(finalRepoPath, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      this.logger.log(`Installing dependencies for ${finalRepoPath}`);
+      try {
+        await execAsync('npm ci --only=production', {
+          timeout: 180000,
+          cwd: finalRepoPath
+        });
+        this.logger.log(`Dependencies installed successfully`);
+      } catch (installError) {
+        this.logger.warn(`Failed to install dependencies: ${installError.message}`);
+        // Fallback: npm install --production
+        try {
+          await execAsync('npm install --production', {
+            timeout: 180000,
+            cwd: finalRepoPath
+          });
+          this.logger.log(`Dependencies installed with fallback`);
+        } catch (fallbackError) {
+          this.logger.error(`All installation attempts failed: ${fallbackError.message}`);
+        }
+      }
+    }
+    
+    return finalRepoPath;
+  } catch (error) {
+    this.logger.error(`Clone failed: ${error.message}`);
+    try {
+      await fs.promises.rm(tempDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      this.logger.warn(`Failed to clean up temp directory: ${cleanupError.message}`);
+    }
+    throw new Error(`Failed to clone repository: ${error.message}`);
   }
+}
 
   private extractRepoName(githubUrl: string): string {
     // Örnek: https://github.com/axios/axios -> axios
