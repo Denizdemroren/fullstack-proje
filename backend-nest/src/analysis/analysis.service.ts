@@ -283,8 +283,8 @@ export class AnalysisService {
         licenseChecker.init(
           {
             start: packageDir,
-            production: true,
-            development: false,
+            production: false,
+            development: true,
             json: true
           },
           (err: Error, packages: any) => {
