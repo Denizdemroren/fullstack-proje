@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { LogIn, UserPlus, Github, AlertCircle, CheckCircle } from 'lucide-react';
 import AnalysisPage from './AnalysisPage';
 
