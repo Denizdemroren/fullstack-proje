@@ -1,35 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Github, 
-  Search, 
-  FileText, 
-  AlertCircle, 
-  CheckCircle, 
-  XCircle, 
-  Loader, 
-  Shield, 
-  ShieldAlert,
-  ShieldCheck,
-  ExternalLink,
-  Calendar,
-  Package,
-  AlertTriangle,
-  Info,
-  ChevronRight,
-  Clock,
-  BarChart3,
-  Copy,
-  Check
-} from 'lucide-react';
+import { Github, Search, FileText, AlertCircle, CheckCircle, XCircle, Loader, ChevronDown, ChevronUp, ExternalLink, Info, Package as PackageIcon } from 'lucide-react';
 
 interface Analysis {
   id: number;
   githubUrl: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   sbomData?: any;
-  licenseReport?: any;
+  licenseReport?: LicenseReport;
   errorMessage?: string;
   createdAt: string;
+}
+
+interface LicenseReport {
+  allowed: LicenseItem[];
+  banned: LicenseItem[];
+  needsReview: LicenseItem[];
+  unknown: LicenseItem[];
+  summary: {
+    total: number;
+    compliant: number;
+    nonCompliant: number;
+    needsReview: number;
+  };
+  projectLicense?: string;
+  projectLicenseCompliant?: boolean;
+  error?: string;
+  warning?: string;
+}
+
+interface LicenseItem {
+  package: string;
+  version: string;
+  license: string;
+  repository?: string;
+  publisher?: string;
+  email?: string;
 }
 
 interface AnalysisPageProps {
@@ -37,22 +42,25 @@ interface AnalysisPageProps {
   username: string;
   onLogout: () => void;
   showMessage: (text: string, type: 'success' | 'error') => void;
-  onAnalysisCreated?: () => void;
 }
 
-const AnalysisPage: React.FC<AnalysisPageProps> = ({ 
-  token, 
-  username, 
-  onLogout, 
-  showMessage,
-  onAnalysisCreated 
-}) => {
+const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, showMessage }) => {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [githubUrl, setGithubUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
-  const [activeTab, setActiveTab] = useState<'summary' | 'sbom' | 'licenses'>('summary');
-  const [copied, setCopied] = useState(false);
+  const [expandedLicenseTypes, setExpandedLicenseTypes] = useState<{
+    allowed: boolean;
+    banned: boolean;
+    needsReview: boolean;
+    unknown: boolean;
+  }>({
+    allowed: false,
+    banned: true,
+    needsReview: true,
+    unknown: false
+  });
+  const [searchTerm, setSearchTerm] = useState('');
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://backend-nest-msnd.onrender.com';
 
@@ -83,10 +91,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
   const handleSubmitAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !githubUrl.trim()) {
-      showMessage('Lütfen geçerli bir GitHub URL\'si girin.', 'error');
-      return;
-    }
+    if (!token || !githubUrl.trim()) return;
 
     setIsLoading(true);
     try {
@@ -110,11 +115,6 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({
         setGithubUrl('');
         showMessage('Analiz başlatıldı! Sonuçlar kısa süre içinde hazır olacak.', 'success');
         
-        if (onAnalysisCreated) {
-          onAnalysisCreated();
-        }
-        
-        // 5 saniye sonra analizleri yenile
         setTimeout(fetchAnalyses, 5000);
       } else {
         const error = await response.json();
@@ -130,7 +130,6 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({
   useEffect(() => {
     if (token) {
       fetchAnalyses();
-      // Her 10 saniyede bir analiz durumlarını güncelle
       const interval = setInterval(fetchAnalyses, 10000);
       return () => clearInterval(interval);
     }
@@ -138,19 +137,10 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({
 
   const getStatusIcon = (status: Analysis['status']) => {
     switch (status) {
-      case 'completed': return <ShieldCheck className="w-5 h-5 text-green-500" />;
+      case 'completed': return <CheckCircle className="w-5 h-5 text-green-500" />;
       case 'processing': return <Loader className="w-5 h-5 text-blue-500 animate-spin" />;
-      case 'failed': return <ShieldAlert className="w-5 h-5 text-red-500" />;
-      default: return <Clock className="w-5 h-5 text-yellow-500" />;
-    }
-  };
-
-  const getStatusColor = (status: Analysis['status']) => {
-    switch (status) {
-      case 'completed': return 'bg-green-100 text-green-800 border-green-300';
-      case 'processing': return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'failed': return 'bg-red-100 text-red-800 border-red-300';
-      default: return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      case 'failed': return <XCircle className="w-5 h-5 text-red-500" />;
+      default: return <AlertCircle className="w-5 h-5 text-yellow-500" />;
     }
   };
 
@@ -164,633 +154,1145 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('tr-TR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return new Date(dateString).toLocaleString('tr-TR');
   };
 
-  const getRepoName = (url: string) => {
-    try {
-      const urlObj = new URL(url);
-      const parts = urlObj.pathname.split('/').filter(p => p);
-      if (parts.length >= 2) {
-        return `${parts[0]}/${parts[1]}`;
-      }
-      return url;
-    } catch {
-      return url;
+  const toggleLicenseType = (type: keyof typeof expandedLicenseTypes) => {
+    setExpandedLicenseTypes(prev => ({
+      ...prev,
+      [type]: !prev[type]
+    }));
+  };
+
+  const getLicenseTypeColor = (type: string) => {
+    switch (type) {
+      case 'allowed': return 'bg-green-100 text-green-800 border-green-300';
+      case 'banned': return 'bg-red-100 text-red-800 border-red-300';
+      case 'needsReview': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      case 'unknown': return 'bg-gray-100 text-gray-800 border-gray-300';
+      default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const getLicenseTypeIcon = (type: string) => {
+    switch (type) {
+      case 'allowed': return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'banned': return <XCircle className="w-4 h-4 text-red-600" />;
+      case 'needsReview': return <AlertCircle className="w-4 h-4 text-yellow-600" />;
+      case 'unknown': return <PackageIcon className="w-4 h-4 text-gray-600" />;
+      default: return <PackageIcon className="w-4 h-4" />;
+    }
   };
 
-  const getLicenseReason = (license: string) => {
-    const lowerLicense = license.toLowerCase();
-    
-    if (lowerLicense.includes('gpl')) {
-      if (lowerLicense.includes('agpl')) {
-        return 'AGPL lisansı türev çalışmaların da aynı lisansla açık kaynak olmasını zorunlu kılar';
-      } else if (lowerLicense.includes('gpl-3')) {
-        return 'GPL-3.0 lisansı türev çalışmaların kaynak kodunun açılmasını gerektirir';
-      } else if (lowerLicense.includes('gpl-2')) {
-        return 'GPL-2.0 lisansı türev çalışmaların kaynak kodunun açılmasını gerektirir';
-      }
-      return 'GPL lisansları ticari kullanımda kısıtlamalar getirir';
+  const getLicenseTypeText = (type: string) => {
+    switch (type) {
+      case 'allowed': return 'Uyumlu';
+      case 'banned': return 'Yasaklı';
+      case 'needsReview': return 'İnceleme Gerekli';
+      case 'unknown': return 'Bilinmeyen';
+      default: return type;
     }
-    
-    if (lowerLicense.includes('lgpl')) {
-      return 'LGPL lisansı dinamik linklemede daha esnektir, ancak yine de inceleme gerekir';
-    }
-    
-    if (lowerLicense.includes('mpl')) {
-      return 'MPL lisansı dosya bazında değişikliklerin açılmasını gerektirir';
-    }
-    
-    return 'Bu lisans türü şirket politikalarına göre değerlendirilmelidir';
   };
 
-  // Analiz Kartı Bileşeni
-  const AnalysisCard: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
-    const stats = analysis.licenseReport?.summary || { 
-      total: 0, 
-      compliant: 0, 
-      nonCompliant: 0, 
-      needsReview: 0 
-    };
-
-    return (
-      <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-5 hover:shadow-xl transition-shadow duration-300">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-              <Github className="w-5 h-5" />
-              {getRepoName(analysis.githubUrl)}
-            </h3>
-            <p className="text-sm text-gray-600 mt-1 truncate max-w-md">{analysis.githubUrl}</p>
-          </div>
-          <div className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 border ${getStatusColor(analysis.status)}`}>
-            {getStatusIcon(analysis.status)}
-            {getStatusText(analysis.status)}
-          </div>
-        </div>
-
-        {analysis.status === 'completed' && stats.total > 0 && (
-          <div className="mb-4">
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              <div className="bg-green-50 p-2 rounded-lg text-center">
-                <div className="text-xl font-bold text-green-700">{stats.compliant}</div>
-                <div className="text-xs text-green-600">Uyumlu</div>
-              </div>
-              <div className="bg-red-50 p-2 rounded-lg text-center">
-                <div className="text-xl font-bold text-red-700">{stats.nonCompliant}</div>
-                <div className="text-xs text-red-600">Yasaklı</div>
-              </div>
-              <div className="bg-yellow-50 p-2 rounded-lg text-center">
-                <div className="text-xl font-bold text-yellow-700">{stats.needsReview}</div>
-                <div className="text-xs text-yellow-600">İnceleme</div>
-              </div>
-              <div className="bg-blue-50 p-2 rounded-lg text-center">
-                <div className="text-xl font-bold text-blue-700">{stats.total}</div>
-                <div className="text-xs text-blue-600">Toplam</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="flex justify-between items-center text-sm text-gray-500">
-          <span className="flex items-center gap-1">
-            <Calendar className="w-4 h-4" />
-            {formatDate(analysis.createdAt)}
-          </span>
-          <button
-            onClick={() => setSelectedAnalysis(analysis)}
-            disabled={analysis.status !== 'completed'}
-            className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1 ${
-              analysis.status === 'completed'
-                ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            Detaylar
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+  const getFilteredLicenses = (licenses: LicenseItem[], type: string) => {
+    if (!searchTerm.trim()) return licenses;
+    
+    const term = searchTerm.toLowerCase();
+    return licenses.filter(item => 
+      item.package.toLowerCase().includes(term) ||
+      item.license.toLowerCase().includes(term) ||
+      item.version.toLowerCase().includes(term)
     );
   };
 
   return (
-    <div className="p-4 sm:p-8 min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 font-sans">
+    <div style={{
+      width: '100%',
+      maxWidth: '1200px',
+      margin: '0 auto'
+    }}>
       {/* Header */}
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 bg-white p-6 rounded-2xl shadow-2xl sticky top-0 z-10 border-l-8 border-blue-600">
-        <div className="flex items-center mb-4 md:mb-0">
-          <div className="p-3 bg-blue-100 rounded-xl mr-4">
-            <Shield className="w-10 h-10 text-blue-600" />
+      <div style={{
+        backgroundColor: '#10b981',
+        borderRadius: '20px',
+        padding: '30px',
+        marginBottom: '30px',
+        border: '4px solid #059669',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '20px'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '15px'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              backgroundColor: '#059669',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Github size={30} color="white" />
+            </div>
+            <div>
+              <h1 style={{
+                color: 'white',
+                fontSize: '32px',
+                fontWeight: 'bold',
+                marginBottom: '5px'
+              }}>
+                GİTHUB REPO ANALİZ
+              </h1>
+              <p style={{ color: '#a7f3d0', fontSize: '16px' }}>
+                OSS Lisans Uyumluluk Kontrolü - Hoş geldin, <strong>{username}</strong>
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-extrabold text-blue-800">GitHub Repo Analiz</h1>
-            <p className="text-gray-600">
-              Hoş Geldiniz, <strong className="font-extrabold text-blue-600">{username}</strong>
-            </p>
-          </div>
-        </div>
-        
-        <div className="flex flex-col md:flex-row items-start md:items-center space-y-3 md:space-y-0 md:space-x-4 w-full md:w-auto">
-          <button
-            onClick={() => window.history.back()}
-            className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 px-5 rounded-xl transition shadow-md flex items-center space-x-2"
-          >
-            <ChevronRight className="w-5 h-5 rotate-180" />
-            <span>Geri Dön</span>
-          </button>
-          
+
           <button
             onClick={onLogout}
-            className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2.5 px-5 rounded-xl transition shadow-md flex items-center space-x-2"
-            title="Çıkış Yap"
+            style={{
+              backgroundColor: '#ef4444',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '10px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
           >
-            <XCircle className="w-5 h-5" />
-            <span>Çıkış Yap</span>
+            <XCircle size={20} />
+            ÇIKIŞ YAP
           </button>
         </div>
-      </header>
+      </div>
 
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Analiz Formu */}
-        <div className="bg-white p-8 rounded-2xl shadow-2xl border-t-8 border-blue-500">
-          <div className="flex items-center mb-6">
-            <div className="p-3 bg-blue-100 rounded-xl mr-4">
-              <Search className="w-8 h-8 text-blue-600" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-800">Yeni Repo Analizi</h2>
-              <p className="text-gray-600">GitHub repository'lerinin lisans uyumluluğunu kontrol edin</p>
-            </div>
+      {/* Analiz Formu */}
+      <div style={{
+        backgroundColor: '#d1fae5',
+        borderRadius: '20px',
+        padding: '30px',
+        marginBottom: '30px',
+        border: '4px solid #10b981'
+      }}>
+        <h2 style={{
+          color: '#065f46',
+          fontSize: '24px',
+          fontWeight: 'bold',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <Search size={24} color="#065f46" />
+          YENİ REPO ANALİZİ
+        </h2>
+        
+        <form onSubmit={handleSubmitAnalysis}>
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{
+              display: 'block',
+              color: '#065f46',
+              fontSize: '16px',
+              fontWeight: '600',
+              marginBottom: '10px'
+            }}>
+              GitHub Repository URL
+            </label>
+            <input
+              type="url"
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              placeholder="https://github.com/kullanici/repo"
+              required
+              style={{
+                width: '100%',
+                padding: '15px',
+                borderRadius: '10px',
+                border: '2px solid #10b981',
+                fontSize: '16px',
+                outline: 'none',
+                backgroundColor: 'white'
+              }}
+            />
+            <p style={{
+              marginTop: '10px',
+              color: '#6b7280',
+              fontSize: '14px'
+            }}>
+              Örnek: https://github.com/facebook/react veya https://github.com/vuejs/vue.git
+            </p>
           </div>
           
-          <form onSubmit={handleSubmitAnalysis} className="space-y-6">
-            <div>
-              <label className="block text-gray-700 text-lg font-semibold mb-3">
-                GitHub Repository URL
-              </label>
-              <div className="flex flex-col md:flex-row gap-3">
-                <input
-                  type="url"
-                  value={githubUrl}
-                  onChange={(e) => setGithubUrl(e.target.value)}
-                  placeholder="https://github.com/kullanici/repository"
-                  required
-                  className="flex-grow py-3.5 px-5 border-2 border-gray-300 rounded-xl text-gray-800 placeholder-gray-400 focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition duration-300 text-lg"
-                />
-                <button
-                  type="submit"
-                  disabled={isLoading || !token}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3.5 px-8 rounded-xl transition duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 flex items-center justify-center min-w-[180px]"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader className="w-5 h-5 mr-2 animate-spin" />
-                      Analiz Başlatılıyor...
-                    </>
-                  ) : (
-                    <>
-                      <Search className="w-5 h-5 mr-2" />
-                      Analiz Başlat
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="mt-3 space-y-2">
-                <p className="text-sm text-gray-500 flex items-center gap-1">
-                  <Info className="w-4 h-4" />
-                  Örnek URL'ler:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setGithubUrl('https://github.com/facebook/react')}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-lg"
-                  >
-                    facebook/react
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGithubUrl('https://github.com/expressjs/express')}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-lg"
-                  >
-                    expressjs/express
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGithubUrl('https://github.com/nodejs/node')}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-lg"
-                  >
-                    nodejs/node
-                  </button>
-                </div>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        {/* Analiz Geçmişi */}
-        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-          <div className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
-              <div className="flex items-center mb-4 md:mb-0">
-                <div className="p-2 bg-white rounded-lg mr-3">
-                  <FileText className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-gray-800">Analiz Geçmişi</h3>
-                  <p className="text-gray-600">Tamamlanan ve devam eden analizleriniz</p>
-                </div>
-              </div>
-              <button
-                onClick={fetchAnalyses}
-                disabled={isLoading}
-                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-5 rounded-xl transition shadow-md flex items-center gap-2 border border-gray-300"
-              >
-                {isLoading ? (
-                  <Loader className="w-4 h-4 animate-spin" />
-                ) : null}
-                Yenile
-              </button>
-            </div>
-          </div>
-          
-          <div className="p-6">
-            {analyses.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                  <Github className="w-12 h-12 text-gray-400" />
-                </div>
-                <h3 className="text-xl font-semibold text-gray-700 mb-2">Henüz analiz yapılmadı</h3>
-                <p className="text-gray-500 mb-6">İlk analizinizi yapmak için yukarıdaki formu kullanın</p>
-              </div>
+          <button
+            type="submit"
+            disabled={isLoading || !token}
+            style={{
+              width: '100%',
+              padding: '15px',
+              backgroundColor: '#10b981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '10px',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: (isLoading || !token) ? 0.7 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px'
+            }}
+          >
+            {isLoading ? (
+              <>
+                <Loader size={20} className="animate-spin" />
+                ANALİZ BAŞLATILIYOR...
+              </>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {analyses.slice(0, 8).map((analysis) => (
-                  <AnalysisCard key={analysis.id} analysis={analysis} />
-                ))}
-              </div>
+              <>
+                <Search size={20} />
+                ANALİZ BAŞLAT
+              </>
             )}
+          </button>
+        </form>
+      </div>
 
-            {analyses.length > 8 && (
-              <div className="mt-8 text-center">
-                <button className="text-blue-600 hover:text-blue-800 font-medium flex items-center justify-center gap-2 mx-auto">
-                  Tüm analiz geçmişini görüntüle ({analyses.length} analiz)
-                  <ExternalLink className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </div>
+      {/* Analiz Listesi */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '20px',
+        overflow: 'hidden',
+        border: '4px solid #10b981',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.1)'
+      }}>
+        <div style={{
+          backgroundColor: '#d1fae5',
+          padding: '20px',
+          borderBottom: '2px solid #10b981'
+        }}>
+          <h3 style={{
+            color: '#065f46',
+            fontSize: '24px',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            <FileText size={24} />
+            ANALİZ GEÇMİŞİ
+          </h3>
         </div>
+        
+        {analyses.length === 0 ? (
+          <div style={{
+            padding: '60px 20px',
+            textAlign: 'center',
+            color: '#6b7280'
+          }}>
+            <Github size={80} color="#9ca3af" style={{ marginBottom: '20px' }} />
+            <p style={{ fontSize: '18px', marginBottom: '10px' }}>Henüz analiz yapılmadı.</p>
+            <p style={{ fontSize: '14px' }}>Yukarıdaki form ile bir GitHub repository analizi başlatın.</p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse'
+            }}>
+              <thead>
+                <tr style={{
+                  backgroundColor: '#f3f4f6'
+                }}>
+                  <th style={{
+                    padding: '16px',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#374151',
+                    fontSize: '14px',
+                    borderBottom: '2px solid #e5e7eb'
+                  }}>
+                    Repository
+                  </th>
+                  <th style={{
+                    padding: '16px',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#374151',
+                    fontSize: '14px',
+                    borderBottom: '2px solid #e5e7eb'
+                  }}>
+                    Durum
+                  </th>
+                  <th style={{
+                    padding: '16px',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#374151',
+                    fontSize: '14px',
+                    borderBottom: '2px solid #e5e7eb'
+                  }}>
+                    Tarih
+                  </th>
+                  <th style={{
+                    padding: '16px',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#374151',
+                    fontSize: '14px',
+                    borderBottom: '2px solid #e5e7eb'
+                  }}>
+                    İşlem
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {analyses.map((analysis) => (
+                  <tr key={analysis.id} style={{
+                    borderBottom: '1px solid #e5e7eb',
+                    backgroundColor: 'white'
+                  }}>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        color: '#111827',
+                        maxWidth: '300px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {analysis.githubUrl}
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {getStatusIcon(analysis.status)}
+                        <span style={{ fontSize: '14px' }}>{getStatusText(analysis.status)}</span>
+                      </div>
+                      {analysis.errorMessage && (
+                        <div style={{
+                          fontSize: '12px',
+                          color: '#dc2626',
+                          marginTop: '4px'
+                        }}>
+                          {analysis.errorMessage}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                        {formatDate(analysis.createdAt)}
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px' }}>
+                      <button
+                        onClick={() => setSelectedAnalysis(analysis)}
+                        disabled={analysis.status !== 'completed'}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          border: 'none',
+                          cursor: analysis.status === 'completed' ? 'pointer' : 'not-allowed',
+                          backgroundColor: analysis.status === 'completed' ? '#dbeafe' : '#f3f4f6',
+                          color: analysis.status === 'completed' ? '#1e40af' : '#9ca3af'
+                        }}
+                      >
+                        Detayları Gör
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Analiz Detay Modal */}
       {selectedAnalysis && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Modal Header */}
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-white rounded-lg">
-                      <Github className="w-6 h-6 text-blue-600" />
-                    </div>
-                    <h3 className="text-2xl font-bold text-gray-800">Analiz Detayları</h3>
-                  </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <p className="text-gray-600 break-all">{selectedAnalysis.githubUrl}</p>
-                    <button
-                      onClick={() => copyToClipboard(selectedAnalysis.githubUrl)}
-                      className="text-gray-400 hover:text-gray-600 p-1"
-                      title="URL'yi kopyala"
-                    >
-                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          zIndex: 50
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '20px',
+            maxWidth: '1200px',
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            border: '4px solid #10b981'
+          }}>
+            <div style={{
+              padding: '24px',
+              borderBottom: '2px solid #e5e7eb',
+              backgroundColor: '#d1fae5'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <h3 style={{
+                  fontSize: '24px',
+                  fontWeight: 'bold',
+                  color: '#065f46'
+                }}>
+                  Analiz Detayları
+                </h3>
                 <button
                   onClick={() => setSelectedAnalysis(null)}
-                  className="text-gray-400 hover:text-gray-600 p-2 ml-4"
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#6b7280'
+                  }}
                 >
-                  <XCircle className="w-6 h-6" />
+                  <XCircle size={24} />
                 </button>
               </div>
-              
-              {/* Tabs */}
-              <div className="flex space-x-1 mt-6">
-                <button
-                  onClick={() => setActiveTab('summary')}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    activeTab === 'summary' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <BarChart3 className="w-4 h-4 inline mr-2" />
-                  Özet
-                </button>
-                <button
-                  onClick={() => setActiveTab('licenses')}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    activeTab === 'licenses' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <Shield className="w-4 h-4 inline mr-2" />
-                  Lisanslar
-                </button>
-                <button
-                  onClick={() => setActiveTab('sbom')}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    activeTab === 'sbom' 
-                      ? 'bg-blue-600 text-white' 
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <Package className="w-4 h-4 inline mr-2" />
-                  SBOM
-                </button>
-              </div>
+              <p style={{
+                marginTop: '8px',
+                color: '#065f46'
+              }}>
+                {selectedAnalysis.githubUrl}
+              </p>
             </div>
             
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {activeTab === 'summary' && selectedAnalysis.licenseReport && (
-                <div className="space-y-6">
+            <div style={{ padding: '24px' }}>
+              {selectedAnalysis.licenseReport ? (
+                <>
                   {/* Özet Kartları */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-gradient-to-br from-green-50 to-green-100 p-5 rounded-xl border border-green-200">
-                      <div className="flex items-center justify-between mb-3">
-                        <ShieldCheck className="w-8 h-8 text-green-600" />
-                        <span className="text-3xl font-bold text-green-700">
+                  <div style={{
+                    backgroundColor: '#d1fae5',
+                    padding: '24px',
+                    borderRadius: '12px',
+                    border: '2px solid #10b981',
+                    marginBottom: '24px'
+                  }}>
+                    <h4 style={{
+                      fontWeight: 'bold',
+                      color: '#065f46',
+                      fontSize: '20px',
+                      marginBottom: '16px'
+                    }}>
+                      Lisans Analiz Sonucu
+                    </h4>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: '16px'
+                    }}>
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        borderRadius: '12px',
+                        border: '2px solid #10b981'
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          fontWeight: 'bold',
+                          color: '#10b981',
+                          marginBottom: '8px'
+                        }}>
                           {selectedAnalysis.licenseReport.summary?.compliant || 0}
-                        </span>
+                        </div>
+                        <div style={{
+                          fontSize: '14px',
+                          color: '#6b7280'
+                        }}>
+                          Uyumlu
+                        </div>
                       </div>
-                      <div className="text-green-800 font-semibold">Uyumlu Lisans</div>
-                      <div className="text-sm text-green-600 mt-1">MIT, Apache, BSD vb.</div>
-                    </div>
-                    
-                    <div className="bg-gradient-to-br from-red-50 to-red-100 p-5 rounded-xl border border-red-200">
-                      <div className="flex items-center justify-between mb-3">
-                        <ShieldAlert className="w-8 h-8 text-red-600" />
-                        <span className="text-3xl font-bold text-red-700">
+                      
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        borderRadius: '12px',
+                        border: '2px solid #ef4444'
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          fontWeight: 'bold',
+                          color: '#ef4444',
+                          marginBottom: '8px'
+                        }}>
                           {selectedAnalysis.licenseReport.summary?.nonCompliant || 0}
-                        </span>
+                        </div>
+                        <div style={{
+                          fontSize: '14px',
+                          color: '#6b7280'
+                        }}>
+                          Yasaklı
+                        </div>
                       </div>
-                      <div className="text-red-800 font-semibold">Yasaklı Lisans</div>
-                      <div className="text-sm text-red-600 mt-1">GPL, AGPL vb.</div>
-                    </div>
-                    
-                    <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 p-5 rounded-xl border border-yellow-200">
-                      <div className="flex items-center justify-between mb-3">
-                        <AlertCircle className="w-8 h-8 text-yellow-600" />
-                        <span className="text-3xl font-bold text-yellow-700">
+                      
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        borderRadius: '12px',
+                        border: '2px solid #f59e0b'
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          fontWeight: 'bold',
+                          color: '#f59e0b',
+                          marginBottom: '8px'
+                        }}>
                           {selectedAnalysis.licenseReport.summary?.needsReview || 0}
-                        </span>
+                        </div>
+                        <div style={{
+                          fontSize: '14px',
+                          color: '#6b7280'
+                        }}>
+                          İnceleme Gerekli
+                        </div>
                       </div>
-                      <div className="text-yellow-800 font-semibold">İnceleme Gerekli</div>
-                      <div className="text-sm text-yellow-600 mt-1">LGPL, MPL vb.</div>
-                    </div>
-                    
-                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-5 rounded-xl border border-blue-200">
-                      <div className="flex items-center justify-between mb-3">
-                        <Package className="w-8 h-8 text-blue-600" />
-                        <span className="text-3xl font-bold text-blue-700">
+                      
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        borderRadius: '12px',
+                        border: '2px solid #3b82f6'
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          fontWeight: 'bold',
+                          color: '#3b82f6',
+                          marginBottom: '8px'
+                        }}>
                           {selectedAnalysis.licenseReport.summary?.total || 0}
-                        </span>
+                        </div>
+                        <div style={{
+                          fontSize: '14px',
+                          color: '#6b7280'
+                        }}>
+                          Toplam Paket
+                        </div>
                       </div>
-                      <div className="text-blue-800 font-semibold">Toplam Paket</div>
-                      <div className="text-sm text-blue-600 mt-1">Tüm bağımlılıklar</div>
                     </div>
+
+                    {/* Proje Lisansı */}
+                    {selectedAnalysis.licenseReport.projectLicense && (
+                      <div style={{
+                        marginTop: '20px',
+                        padding: '16px',
+                        backgroundColor: 'white',
+                        borderRadius: '10px',
+                        border: '2px solid',
+                        borderColor: selectedAnalysis.licenseReport.projectLicenseCompliant ? '#10b981' : '#ef4444'
+                      }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          marginBottom: '8px'
+                        }}>
+                          {selectedAnalysis.licenseReport.projectLicenseCompliant ? (
+                            <CheckCircle className="w-5 h-5 text-green-500" />
+                          ) : (
+                            <AlertCircle className="w-5 h-5 text-red-500" />
+                          )}
+                          <span style={{
+                            fontWeight: 'bold',
+                            color: '#111827'
+                          }}>
+                            Proje Lisansı: {selectedAnalysis.licenseReport.projectLicense}
+                          </span>
+                        </div>
+                        <p style={{
+                          color: '#6b7280',
+                          fontSize: '14px',
+                          marginLeft: '30px'
+                        }}>
+                          {selectedAnalysis.licenseReport.projectLicenseCompliant 
+                            ? '✓ Bu lisans açık kaynak kullanımı için uyumludur.' 
+                            : '⚠ Bu lisans açık kaynak kullanımı için uyumlu olmayabilir.'}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Proje Lisansı */}
-                  {selectedAnalysis.licenseReport.projectLicense && (
-                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-5 rounded-xl border border-gray-300">
-                      <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                        <Shield className="w-5 h-5" />
-                        Proje Ana Lisansı
+                  {/* Lisans Detayları */}
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '16px'
+                    }}>
+                      <h4 style={{
+                        fontWeight: 'bold',
+                        color: '#1f2937',
+                        fontSize: '20px'
+                      }}>
+                        Paket Lisans Detayları
                       </h4>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <span className="text-2xl font-bold text-gray-800">
-                            {selectedAnalysis.licenseReport.projectLicense}
-                          </span>
-                          <div className={`inline-flex items-center ml-3 px-3 py-1 rounded-full text-sm ${
-                            selectedAnalysis.licenseReport.projectLicenseCompliant
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {selectedAnalysis.licenseReport.projectLicenseCompliant ? 'Uyumlu' : 'Uyumsuz'}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}>
+                        <input
+                          type="text"
+                          placeholder="Paket veya lisans ara..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '2px solid #e5e7eb',
+                            fontSize: '14px',
+                            width: '200px'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Uyumlu Lisanslar */}
+                    {selectedAnalysis.licenseReport.allowed && selectedAnalysis.licenseReport.allowed.length > 0 && (
+                      <div style={{
+                        marginBottom: '16px',
+                        border: '2px solid #10b981',
+                        borderRadius: '12px',
+                        overflow: 'hidden'
+                      }}>
+                        <div
+                          onClick={() => toggleLicenseType('allowed')}
+                          style={{
+                            backgroundColor: '#d1fae5',
+                            padding: '16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <CheckCircle size={20} color="#10b981" />
+                            <span style={{ fontWeight: 'bold', color: '#065f46' }}>
+                              Uyumlu Lisanslar ({selectedAnalysis.licenseReport.allowed.length})
+                            </span>
                           </div>
+                          {expandedLicenseTypes.allowed ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                         </div>
-                        {!selectedAnalysis.licenseReport.projectLicenseCompliant && (
-                          <AlertTriangle className="w-8 h-8 text-red-500" />
+                        
+                        {expandedLicenseTypes.allowed && (
+                          <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.allowed, 'allowed').length === 0 ? (
+                              <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                                {searchTerm ? 'Aramanızla eşleşen uyumlu paket bulunamadı.' : 'Uyumlu paket bulunamadı.'}
+                              </div>
+                            ) : (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                                gap: '12px'
+                              }}>
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.allowed, 'allowed').map((item, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      backgroundColor: 'white',
+                                      border: '1px solid #10b981',
+                                      borderRadius: '8px',
+                                      padding: '12px'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                      <span style={{ fontWeight: 'bold', color: '#111827' }}>
+                                        {item.package}
+                                      </span>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#10b981',
+                                        color: 'white'
+                                      }}>
+                                        v{item.version}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#dcfce7',
+                                        color: '#166534'
+                                      }}>
+                                        {item.license}
+                                      </span>
+                                      {item.repository && (
+                                        <a
+                                          href={item.repository}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            fontSize: '12px',
+                                            color: '#3b82f6'
+                                          }}
+                                        >
+                                          <ExternalLink size={12} />
+                                          Repo
+                                        </a>
+                                      )}
+                                    </div>
+                                    {item.publisher && (
+                                      <div style={{
+                                        fontSize: '12px',
+                                        color: '#6b7280',
+                                        marginTop: '4px'
+                                      }}>
+                                        Yayıncı: {item.publisher}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Öneriler */}
-                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 p-5 rounded-xl border border-blue-300">
-                    <h4 className="font-bold text-gray-800 mb-3">Öneriler</h4>
-                    <ul className="space-y-2">
-                      {selectedAnalysis.licenseReport.summary?.nonCompliant > 0 && (
-                        <li className="flex items-start gap-2">
-                          <ShieldAlert className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-                          <span>
-                            <strong>{selectedAnalysis.licenseReport.summary.nonCompliant} yasaklı lisans</strong> tespit edildi. 
-                            Bu paketleri alternatifleriyle değiştirmeniz önerilir.
-                          </span>
-                        </li>
-                      )}
-                      {selectedAnalysis.licenseReport.summary?.needsReview > 0 && (
-                        <li className="flex items-start gap-2">
-                          <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
-                          <span>
-                            <strong>{selectedAnalysis.licenseReport.summary.needsReview} paket</strong> yasal inceleme gerektiriyor. 
-                            Hukuk departmanınızla görüşmeniz önerilir.
-                          </span>
-                        </li>
-                      )}
-                      {selectedAnalysis.licenseReport.summary?.compliant === selectedAnalysis.licenseReport.summary?.total && (
-                        <li className="flex items-start gap-2">
-                          <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
-                          <span>
-                            <strong>Tebrikler!</strong> Tüm paketler uyumlu lisanslara sahip. Proje güvenle kullanılabilir.
-                          </span>
-                        </li>
-                      )}
-                    </ul>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'licenses' && selectedAnalysis.licenseReport && (
-                <div className="space-y-6">
-                  {/* Yasaklı Lisanslar */}
-                  {selectedAnalysis.licenseReport.banned && selectedAnalysis.licenseReport.banned.length > 0 && (
-                    <div>
-                      <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-red-700">
-                        <ShieldAlert className="w-5 h-5" />
-                        Yasaklı Lisanslar ({selectedAnalysis.licenseReport.banned.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {selectedAnalysis.licenseReport.banned.slice(0, 10).map((pkg: any, index: number) => (
-                          <div key={index} className="bg-red-50 border border-red-200 rounded-xl p-4">
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <div className="font-bold text-red-800">{pkg.package}@{pkg.version}</div>
-                                <div className="text-red-600 mt-1">{pkg.license}</div>
-                                <div className="text-sm text-red-500 mt-2">
-                                  <AlertTriangle className="w-4 h-4 inline mr-1" />
-                                  {getLicenseReason(pkg.license)}
-                                </div>
+                    {/* Yasaklı Lisanslar */}
+                    {selectedAnalysis.licenseReport.banned && selectedAnalysis.licenseReport.banned.length > 0 && (
+                      <div style={{
+                        marginBottom: '16px',
+                        border: '2px solid #ef4444',
+                        borderRadius: '12px',
+                        overflow: 'hidden'
+                      }}>
+                        <div
+                          onClick={() => toggleLicenseType('banned')}
+                          style={{
+                            backgroundColor: '#fee2e2',
+                            padding: '16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <XCircle size={20} color="#ef4444" />
+                            <span style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
+                              Yasaklı Lisanslar ({selectedAnalysis.licenseReport.banned.length})
+                            </span>
+                          </div>
+                          {expandedLicenseTypes.banned ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        </div>
+                        
+                        {expandedLicenseTypes.banned && (
+                          <div style={{ padding: '16px', backgroundColor: '#fef2f2' }}>
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.banned, 'banned').length === 0 ? (
+                              <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                                {searchTerm ? 'Aramanızla eşleşen yasaklı paket bulunamadı.' : 'Yasaklı paket bulunamadı.'}
                               </div>
-                              <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full">
-                                YASAKLI
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* İnceleme Gerekenler */}
-                  {selectedAnalysis.licenseReport.needsReview && selectedAnalysis.licenseReport.needsReview.length > 0 && (
-                    <div>
-                      <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-yellow-700">
-                        <AlertCircle className="w-5 h-5" />
-                        İnceleme Gerekenler ({selectedAnalysis.licenseReport.needsReview.length})
-                      </h4>
-                      <div className="space-y-3">
-                        {selectedAnalysis.licenseReport.needsReview.slice(0, 10).map((pkg: any, index: number) => (
-                          <div key={index} className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <div className="font-bold text-yellow-800">{pkg.package}@{pkg.version}</div>
-                                <div className="text-yellow-600 mt-1">{pkg.license}</div>
-                                <div className="text-sm text-yellow-500 mt-2">
-                                  <Info className="w-4 h-4 inline mr-1" />
-                                  {getLicenseReason(pkg.license)}
-                                </div>
+                            ) : (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                                gap: '12px'
+                              }}>
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.banned, 'banned').map((item, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      backgroundColor: 'white',
+                                      border: '1px solid #ef4444',
+                                      borderRadius: '8px',
+                                      padding: '12px'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                      <span style={{ fontWeight: 'bold', color: '#111827' }}>
+                                        {item.package}
+                                      </span>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#ef4444',
+                                        color: 'white'
+                                      }}>
+                                        v{item.version}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#fee2e2',
+                                        color: '#991b1b'
+                                      }}>
+                                        {item.license}
+                                      </span>
+                                      {item.repository && (
+                                        <a
+                                          href={item.repository}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            fontSize: '12px',
+                                            color: '#3b82f6'
+                                          }}
+                                        >
+                                          <ExternalLink size={12} />
+                                          Repo
+                                        </a>
+                                      )}
+                                    </div>
+                                    <div style={{
+                                      display: 'inline-block',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px',
+                                      fontSize: '11px',
+                                      fontWeight: '500',
+                                      backgroundColor: '#fee2e2',
+                                      color: '#dc2626',
+                                      marginBottom: '8px'
+                                    }}>
+                                      ⚠ Yüksek Risk
+                                    </div>
+                                    {item.publisher && (
+                                      <div style={{
+                                        fontSize: '12px',
+                                        color: '#6b7280',
+                                        marginTop: '4px'
+                                      }}>
+                                        Yayıncı: {item.publisher}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
-                              <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full">
-                                İNCELE
-                              </span>
-                            </div>
+                            )}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Uyumlu Lisanslar */}
-                  {selectedAnalysis.licenseReport.allowed && selectedAnalysis.licenseReport.allowed.length > 0 && (
+                    {/* İnceleme Gereken Lisanslar */}
+                    {selectedAnalysis.licenseReport.needsReview && selectedAnalysis.licenseReport.needsReview.length > 0 && (
+                      <div style={{
+                        marginBottom: '16px',
+                        border: '2px solid #f59e0b',
+                        borderRadius: '12px',
+                        overflow: 'hidden'
+                      }}>
+                        <div
+                          onClick={() => toggleLicenseType('needsReview')}
+                          style={{
+                            backgroundColor: '#fef3c7',
+                            padding: '16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <AlertCircle size={20} color="#f59e0b" />
+                            <span style={{ fontWeight: 'bold', color: '#92400e' }}>
+                              İnceleme Gereken Lisanslar ({selectedAnalysis.licenseReport.needsReview.length})
+                            </span>
+                          </div>
+                          {expandedLicenseTypes.needsReview ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        </div>
+                        
+                        {expandedLicenseTypes.needsReview && (
+                          <div style={{ padding: '16px', backgroundColor: '#fffbeb' }}>
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview, 'needsReview').length === 0 ? (
+                              <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                                {searchTerm ? 'Aramanızla eşleşen paket bulunamadı.' : 'İnceleme gereken paket bulunamadı.'}
+                              </div>
+                            ) : (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                                gap: '12px'
+                              }}>
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview, 'needsReview').map((item, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      backgroundColor: 'white',
+                                      border: '1px solid #f59e0b',
+                                      borderRadius: '8px',
+                                      padding: '12px'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                      <span style={{ fontWeight: 'bold', color: '#111827' }}>
+                                        {item.package}
+                                      </span>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#f59e0b',
+                                        color: 'white'
+                                      }}>
+                                        v{item.version}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#fef3c7',
+                                        color: '#92400e'
+                                      }}>
+                                        {item.license}
+                                      </span>
+                                      {item.repository && (
+                                        <a
+                                          href={item.repository}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            fontSize: '12px',
+                                            color: '#3b82f6'
+                                          }}
+                                        >
+                                          <ExternalLink size={12} />
+                                          Repo
+                                        </a>
+                                      )}
+                                    </div>
+                                    <div style={{
+                                      display: 'inline-block',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px',
+                                      fontSize: '11px',
+                                      fontWeight: '500',
+                                      backgroundColor: '#fef3c7',
+                                      color: '#d97706',
+                                      marginBottom: '8px'
+                                    }}>
+                                      ⚠ Orta Risk
+                                    </div>
+                                    {item.publisher && (
+                                      <div style={{
+                                        fontSize: '12px',
+                                        color: '#6b7280',
+                                        marginTop: '4px'
+                                      }}>
+                                        Yayıncı: {item.publisher}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Bilinmeyen Lisanslar */}
+                    {selectedAnalysis.licenseReport.unknown && selectedAnalysis.licenseReport.unknown.length > 0 && (
+                      <div style={{
+                        marginBottom: '16px',
+                        border: '2px solid #6b7280',
+                        borderRadius: '12px',
+                        overflow: 'hidden'
+                      }}>
+                        <div
+                          onClick={() => toggleLicenseType('unknown')}
+                          style={{
+                            backgroundColor: '#f3f4f6',
+                            padding: '16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <PackageIcon size={20} color="#6b7280" />
+                            <span style={{ fontWeight: 'bold', color: '#374151' }}>
+                              Bilinmeyen Lisanslar ({selectedAnalysis.licenseReport.unknown.length})
+                            </span>
+                          </div>
+                          {expandedLicenseTypes.unknown ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        </div>
+                        
+                        {expandedLicenseTypes.unknown && (
+                          <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.unknown, 'unknown').length === 0 ? (
+                              <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                                {searchTerm ? 'Aramanızla eşleşen paket bulunamadı.' : 'Bilinmeyen lisanslı paket bulunamadı.'}
+                              </div>
+                            ) : (
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                                gap: '12px'
+                              }}>
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.unknown, 'unknown').map((item, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      backgroundColor: 'white',
+                                      border: '1px solid #6b7280',
+                                      borderRadius: '8px',
+                                      padding: '12px'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                      <span style={{ fontWeight: 'bold', color: '#111827' }}>
+                                        {item.package}
+                                      </span>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#6b7280',
+                                        color: 'white'
+                                      }}>
+                                        v{item.version}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        fontWeight: '500',
+                                        backgroundColor: '#f3f4f6',
+                                        color: '#4b5563'
+                                      }}>
+                                        {item.license}
+                                      </span>
+                                      {item.repository && (
+                                        <a
+                                          href={item.repository}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            fontSize: '12px',
+                                            color: '#3b82f6'
+                                          }}
+                                        >
+                                          <ExternalLink size={12} />
+                                          Repo
+                                        </a>
+                                      )}
+                                    </div>
+                                    <div style={{
+                                      fontSize: '12px',
+                                      color: '#6b7280',
+                                      fontStyle: 'italic',
+                                      marginTop: '8px'
+                                    }}>
+                                      Lisans tipi belirlenemedi, manuel inceleme önerilir.
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SBOM Verisi */}
+                  {selectedAnalysis.sbomData && (
                     <div>
-                      <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-green-700">
-                        <ShieldCheck className="w-5 h-5" />
-                        Uyumlu Lisanslar ({selectedAnalysis.licenseReport.allowed.length})
+                      <h4 style={{
+                        fontWeight: 'bold',
+                        color: '#1f2937',
+                        fontSize: '20px',
+                        marginBottom: '16px'
+                      }}>
+                        SBOM Detayları
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {selectedAnalysis.licenseReport.allowed.slice(0, 20).map((pkg: any, index: number) => (
-                          <div key={index} className="bg-green-50 border border-green-200 rounded-xl p-3">
-                            <div className="font-bold text-green-800 truncate">{pkg.package}</div>
-                            <div className="text-sm text-green-600">v{pkg.version}</div>
-                            <div className="text-xs text-green-500 mt-1">{pkg.license}</div>
-                          </div>
-                        ))}
+                      <div style={{
+                        backgroundColor: '#f9fafb',
+                        padding: '16px',
+                        borderRadius: '12px',
+                        border: '2px solid #e5e7eb',
+                        maxHeight: '300px',
+                        overflowY: 'auto'
+                      }}>
+                        <pre style={{
+                          fontSize: '12px',
+                          whiteSpace: 'pre-wrap',
+                          fontFamily: 'monospace',
+                          lineHeight: '1.5'
+                        }}>
+                          {JSON.stringify(selectedAnalysis.sbomData, null, 2)}
+                        </pre>
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {activeTab === 'sbom' && selectedAnalysis.sbomData && (
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="font-bold text-gray-800 mb-4">Proje Bilgileri</h4>
-                    <div className="bg-gray-50 rounded-xl p-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <div className="text-sm text-gray-500">Proje Adı</div>
-                          <div className="font-bold text-gray-800 text-lg">
-                            {selectedAnalysis.sbomData.projectName || 'Belirtilmemiş'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-500">Versiyon</div>
-                          <div className="font-bold text-gray-800 text-lg">
-                            {selectedAnalysis.sbomData.version || 'Belirtilmemiş'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-500">Lisans</div>
-                          <div className="font-bold text-gray-800 text-lg">
-                            {selectedAnalysis.sbomData.license || 'Belirtilmemiş'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-500">Bulunduğu Yer</div>
-                          <div className="font-bold text-gray-800 text-lg">
-                            {selectedAnalysis.sbomData.foundAt || 'Belirtilmemiş'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Bağımlılıklar */}
-                  {selectedAnalysis.sbomData.dependencies && Object.keys(selectedAnalysis.sbomData.dependencies).length > 0 && (
-                    <div>
-                      <h4 className="font-bold text-gray-800 mb-4">Bağımlılıklar ({Object.keys(selectedAnalysis.sbomData.dependencies).length})</h4>
-                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                        <div className="max-h-60 overflow-y-auto">
-                          <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Paket</th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Versiyon</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {Object.entries(selectedAnalysis.sbomData.dependencies).map(([name, version]: [string, any]) => (
-                                <tr key={name} className="hover:bg-gray-50">
-                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{name}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-500">{version}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* JSON View */}
-                  <div>
-                    <h4 className="font-bold text-gray-800 mb-4">Ham SBOM Verisi</h4>
-                    <div className="bg-gray-900 rounded-xl p-4 overflow-x-auto">
-                      <pre className="text-gray-100 text-sm">
-                        {JSON.stringify(selectedAnalysis.sbomData, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
+                </>
+              ) : (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '48px 20px',
+                  color: '#6b7280'
+                }}>
+                  <AlertCircle size={64} color="#9ca3af" style={{ marginBottom: '16px' }} />
+                  <p style={{ fontSize: '18px', marginBottom: '8px' }}>
+                    Analiz sonuçları henüz hazır değil veya bir hata oluştu.
+                  </p>
                 </div>
               )}
             </div>
