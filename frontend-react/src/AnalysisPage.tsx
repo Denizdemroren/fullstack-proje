@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Github, Search, FileText, AlertCircle, CheckCircle, XCircle, Loader, ChevronDown, ChevronUp, ExternalLink, Info, Package as PackageIcon } from 'lucide-react';
+import { Github, Search, FileText, AlertCircle, CheckCircle, XCircle, Loader, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 
 interface Analysis {
   id: number;
@@ -164,37 +164,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
     }));
   };
 
-  const getLicenseTypeColor = (type: string) => {
-    switch (type) {
-      case 'allowed': return 'bg-green-100 text-green-800 border-green-300';
-      case 'banned': return 'bg-red-100 text-red-800 border-red-300';
-      case 'needsReview': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'unknown': return 'bg-gray-100 text-gray-800 border-gray-300';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getLicenseTypeIcon = (type: string) => {
-    switch (type) {
-      case 'allowed': return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'banned': return <XCircle className="w-4 h-4 text-red-600" />;
-      case 'needsReview': return <AlertCircle className="w-4 h-4 text-yellow-600" />;
-      case 'unknown': return <PackageIcon className="w-4 h-4 text-gray-600" />;
-      default: return <PackageIcon className="w-4 h-4" />;
-    }
-  };
-
-  const getLicenseTypeText = (type: string) => {
-    switch (type) {
-      case 'allowed': return 'Uyumlu';
-      case 'banned': return 'Yasaklı';
-      case 'needsReview': return 'İnceleme Gerekli';
-      case 'unknown': return 'Bilinmeyen';
-      default: return type;
-    }
-  };
-
-  const getFilteredLicenses = (licenses: LicenseItem[], type: string) => {
+  const getFilteredLicenses = (licenses: LicenseItem[]) => {
     if (!searchTerm.trim()) return licenses;
     
     const term = searchTerm.toLowerCase();
@@ -810,7 +780,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                         
                         {expandedLicenseTypes.allowed && (
                           <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
-                            {getFilteredLicenses(selectedAnalysis.licenseReport.allowed, 'allowed').length === 0 ? (
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.allowed).length === 0 ? (
                               <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
                                 {searchTerm ? 'Aramanızla eşleşen uyumlu paket bulunamadı.' : 'Uyumlu paket bulunamadı.'}
                               </div>
@@ -820,7 +790,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                                 gap: '12px'
                               }}>
-                                {getFilteredLicenses(selectedAnalysis.licenseReport.allowed, 'allowed').map((item, index) => (
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.allowed).map((item, index) => (
                                   <div
                                     key={index}
                                     style={{
@@ -922,7 +892,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                         
                         {expandedLicenseTypes.banned && (
                           <div style={{ padding: '16px', backgroundColor: '#fef2f2' }}>
-                            {getFilteredLicenses(selectedAnalysis.licenseReport.banned, 'banned').length === 0 ? (
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.banned).length === 0 ? (
                               <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
                                 {searchTerm ? 'Aramanızla eşleşen yasaklı paket bulunamadı.' : 'Yasaklı paket bulunamadı.'}
                               </div>
@@ -932,7 +902,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                                 gap: '12px'
                               }}>
-                                {getFilteredLicenses(selectedAnalysis.licenseReport.banned, 'banned').map((item, index) => (
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.banned).map((item, index) => (
                                   <div
                                     key={index}
                                     style={{
@@ -1046,7 +1016,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                         
                         {expandedLicenseTypes.needsReview && (
                           <div style={{ padding: '16px', backgroundColor: '#fffbeb' }}>
-                            {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview, 'needsReview').length === 0 ? (
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview).length === 0 ? (
                               <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
                                 {searchTerm ? 'Aramanızla eşleşen paket bulunamadı.' : 'İnceleme gereken paket bulunamadı.'}
                               </div>
@@ -1056,7 +1026,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                                 gap: '12px'
                               }}>
-                                {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview, 'needsReview').map((item, index) => (
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.needsReview).map((item, index) => (
                                   <div
                                     key={index}
                                     style={{
@@ -1160,7 +1130,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <PackageIcon size={20} color="#6b7280" />
+                            <AlertCircle size={20} color="#6b7280" />
                             <span style={{ fontWeight: 'bold', color: '#374151' }}>
                               Bilinmeyen Lisanslar ({selectedAnalysis.licenseReport.unknown.length})
                             </span>
@@ -1170,7 +1140,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                         
                         {expandedLicenseTypes.unknown && (
                           <div style={{ padding: '16px', backgroundColor: '#f9fafb' }}>
-                            {getFilteredLicenses(selectedAnalysis.licenseReport.unknown, 'unknown').length === 0 ? (
+                            {getFilteredLicenses(selectedAnalysis.licenseReport.unknown).length === 0 ? (
                               <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
                                 {searchTerm ? 'Aramanızla eşleşen paket bulunamadı.' : 'Bilinmeyen lisanslı paket bulunamadı.'}
                               </div>
@@ -1180,7 +1150,7 @@ const AnalysisPage: React.FC<AnalysisPageProps> = ({ token, username, onLogout, 
                                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                                 gap: '12px'
                               }}>
-                                {getFilteredLicenses(selectedAnalysis.licenseReport.unknown, 'unknown').map((item, index) => (
+                                {getFilteredLicenses(selectedAnalysis.licenseReport.unknown).map((item, index) => (
                                   <div
                                     key={index}
                                     style={{
